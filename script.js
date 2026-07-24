@@ -1,5 +1,5 @@
 /*
-  請把下方 ChangeMe2026! 改成你自己的密碼。
+  請把下方 jpRakuTen2026! 改成你自己的密碼。
   注意：這是前端密碼，只能阻擋一般訪客。
 */
 const APP_PASSWORD = "ChangeMe2026!";
