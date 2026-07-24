@@ -2,10 +2,10 @@
 // Firebase Console → Project settings → Your apps → Web app
 
 export const firebaseConfig = {
-  apiKey: "PASTE_YOUR_API_KEY",
-  authDomain: "PASTE_YOUR_PROJECT.firebaseapp.com",
-  projectId: "PASTE_YOUR_PROJECT_ID",
-  storageBucket: "PASTE_YOUR_PROJECT.appspot.com",
-  messagingSenderId: "PASTE_YOUR_SENDER_ID",
-  appId: "PASTE_YOUR_APP_ID"
+  apiKey: "AIzaSyCji9JRzfnR_E488uw_Kl_i3XryN6aZ5OQ",
+  authDomain: "japan-ec-dashboard.firebaseapp.com",
+  projectId: "japan-ec-dashboard",
+  storageBucket: "japan-ec-dashboard.firebasestorage.app",
+  messagingSenderId: "365666288337",
+  appId: "1:365666288337:web:382d58336add6ce9e23bf0"
 };
