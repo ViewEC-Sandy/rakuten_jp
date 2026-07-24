@@ -9,6 +9,29 @@
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.3/dist/chart.umd.min.js"></script>
 </head>
 <body>
+
+  <section class="login-screen" id="loginScreen">
+    <div class="login-card">
+      <p class="eyebrow">PRIVATE ACCESS</p>
+      <h1>日本電商營運儀表板</h1>
+      <p class="login-description">請輸入密碼後繼續。</p>
+
+      <form id="loginForm">
+        <label for="loginPassword">密碼</label>
+        <input id="loginPassword" type="password"
+          autocomplete="current-password"
+          placeholder="請輸入密碼" required>
+        <button class="primary-btn login-button" type="submit">登入</button>
+        <p id="loginMessage" class="login-message"></p>
+      </form>
+
+      <p class="login-warning">
+        此登入畫面只能避免一般訪客直接進入，不等同正式的伺服器端身分驗證。
+      </p>
+    </div>
+  </section>
+
+  <div id="appContent" class="hidden">
   <header class="hero">
     <div class="hero-inner">
       <div>
@@ -177,5 +200,6 @@
   </main>
 
   <script src="script.js"></script>
+  </div>
 </body>
 </html>

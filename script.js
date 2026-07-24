@@ -1,3 +1,38 @@
+/*
+  請把下方 ChangeMe2026! 改成你自己的密碼。
+  注意：這是前端密碼，只能阻擋一般訪客。
+*/
+const APP_PASSWORD = "ChangeMe2026!";
+
+const loginScreen = document.getElementById("loginScreen");
+const appContent = document.getElementById("appContent");
+const loginForm = document.getElementById("loginForm");
+const loginPassword = document.getElementById("loginPassword");
+const loginMessage = document.getElementById("loginMessage");
+
+function unlockApp() {
+  loginScreen.classList.add("hidden");
+  appContent.classList.remove("hidden");
+}
+
+if (sessionStorage.getItem("dashboardAuthenticated") === "yes") {
+  unlockApp();
+}
+
+loginForm.addEventListener("submit", event => {
+  event.preventDefault();
+
+  if (loginPassword.value === APP_PASSWORD) {
+    sessionStorage.setItem("dashboardAuthenticated", "yes");
+    loginMessage.textContent = "";
+    loginPassword.value = "";
+    unlockApp();
+  } else {
+    loginMessage.textContent = "密碼錯誤，請重新輸入。";
+    loginPassword.select();
+  }
+});
+
 const state = {
   rawRows: [],
   headers: [],
