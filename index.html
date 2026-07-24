@@ -1,0 +1,181 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>日本電商營運儀表板</title>
+  <link rel="stylesheet" href="style.css">
+  <script src="https://cdn.jsdelivr.net/npm/papaparse@5.4.1/papaparse.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.3/dist/chart.umd.min.js"></script>
+</head>
+<body>
+  <header class="hero">
+    <div class="hero-inner">
+      <div>
+        <p class="eyebrow">JAPAN EC ANALYTICS</p>
+        <h1>日本電商營運儀表板</h1>
+        <p class="subtitle">上傳日文 CSV，自動對應欄位並分析銷售、訂單與商品表現。</p>
+      </div>
+      <div class="privacy-note">CSV 僅在瀏覽器內處理，不會上傳到伺服器</div>
+    </div>
+  </header>
+
+  <main class="container">
+    <section class="panel upload-panel">
+      <div class="section-heading">
+        <div>
+          <p class="section-kicker">STEP 1</p>
+          <h2>上傳 CSV</h2>
+        </div>
+      </div>
+
+      <label class="drop-zone" id="dropZone">
+        <input type="file" id="csvFile" accept=".csv,text/csv">
+        <span class="drop-title">點擊選擇，或把 CSV 拖曳到這裡</span>
+        <span class="drop-hint">支援 UTF-8、Shift_JIS 常見日文 CSV</span>
+      </label>
+
+      <div class="status-row">
+        <span id="fileName">尚未選擇檔案</span>
+        <span id="message"></span>
+      </div>
+    </section>
+
+    <section class="panel hidden" id="mappingSection">
+      <div class="section-heading">
+        <div>
+          <p class="section-kicker">STEP 2</p>
+          <h2>欄位對應</h2>
+          <p>系統會嘗試自動判斷，你也可以手動調整。</p>
+        </div>
+        <button id="saveMappingBtn" class="secondary-btn" type="button">儲存設定</button>
+      </div>
+
+      <div class="mapping-grid">
+        <label>日期
+          <select id="mapDate"></select>
+        </label>
+        <label>訂單編號
+          <select id="mapOrderId"></select>
+        </label>
+        <label>商品名稱
+          <select id="mapProduct"></select>
+        </label>
+        <label>SKU／商品管理編號
+          <select id="mapSku"></select>
+        </label>
+        <label>數量
+          <select id="mapQuantity"></select>
+        </label>
+        <label>營收
+          <select id="mapRevenue"></select>
+        </label>
+        <label>平台
+          <select id="mapPlatform"></select>
+        </label>
+        <label>店鋪
+          <select id="mapStore"></select>
+        </label>
+        <label>廣告費
+          <select id="mapAdCost"></select>
+        </label>
+      </div>
+
+      <div class="mapping-actions">
+        <button id="analyzeBtn" class="primary-btn" type="button">開始分析</button>
+        <button id="resetMappingBtn" class="text-btn" type="button">清除已儲存設定</button>
+      </div>
+    </section>
+
+    <section id="dashboard" class="hidden">
+      <section class="kpi-grid">
+        <article class="kpi-card">
+          <span>總營收</span>
+          <strong id="totalRevenue">¥0</strong>
+        </article>
+        <article class="kpi-card">
+          <span>訂單數</span>
+          <strong id="totalOrders">0</strong>
+        </article>
+        <article class="kpi-card">
+          <span>平均客單價</span>
+          <strong id="aov">¥0</strong>
+        </article>
+        <article class="kpi-card">
+          <span>銷售數量</span>
+          <strong id="totalQuantity">0</strong>
+        </article>
+        <article class="kpi-card">
+          <span>商品數</span>
+          <strong id="productCount">0</strong>
+        </article>
+        <article class="kpi-card">
+          <span>廣告費</span>
+          <strong id="totalAdCost">—</strong>
+        </article>
+        <article class="kpi-card">
+          <span>ROAS</span>
+          <strong id="roas">—</strong>
+        </article>
+        <article class="kpi-card">
+          <span>TACoS</span>
+          <strong id="tacos">—</strong>
+        </article>
+      </section>
+
+      <section class="chart-grid">
+        <article class="panel chart-card">
+          <div class="section-heading compact">
+            <div>
+              <p class="section-kicker">TREND</p>
+              <h2>每日營收趨勢</h2>
+            </div>
+          </div>
+          <div class="chart-wrap"><canvas id="revenueChart"></canvas></div>
+        </article>
+
+        <article class="panel chart-card">
+          <div class="section-heading compact">
+            <div>
+              <p class="section-kicker">TOP PRODUCTS</p>
+              <h2>商品營收排行</h2>
+            </div>
+          </div>
+          <div class="chart-wrap"><canvas id="productChart"></canvas></div>
+        </article>
+      </section>
+
+      <section class="panel">
+        <div class="section-heading">
+          <div>
+            <p class="section-kicker">DETAIL</p>
+            <h2>資料明細</h2>
+          </div>
+          <input id="tableSearch" class="search-input" type="search" placeholder="搜尋商品、訂單編號或 SKU">
+        </div>
+
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>日期</th>
+                <th>訂單編號</th>
+                <th>商品</th>
+                <th>SKU</th>
+                <th>數量</th>
+                <th>營收</th>
+                <th>平台</th>
+                <th>店鋪</th>
+              </tr>
+            </thead>
+            <tbody id="tableBody"></tbody>
+          </table>
+        </div>
+        <p class="table-note">表格最多顯示前 300 筆符合條件的資料。</p>
+      </section>
+    </section>
+  </main>
+
+  <script src="script.js"></script>
+</body>
+</html>
