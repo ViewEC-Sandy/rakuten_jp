@@ -3,202 +3,246 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>日本 EC Dashboard V2</title>
+  <title>Japan EC Dashboard V5</title>
   <link rel="stylesheet" href="style.css">
   <script src="https://cdn.jsdelivr.net/npm/papaparse@5.4.1/papaparse.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.3/dist/chart.umd.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/sortablejs@1.15.2/Sortable.min.js"></script>
 </head>
 <body>
-  <div class="app-shell">
+  <div id="loadingScreen" class="loading-screen">載入中…</div>
+
+  <section id="authScreen" class="auth-screen hidden">
+    <div class="auth-card">
+      <div class="auth-brand">EC</div>
+      <p class="eyebrow">JAPAN E-COMMERCE ANALYTICS</p>
+      <h1>Japan EC Dashboard</h1>
+      <p class="muted">請使用已建立的 Firebase 帳號登入。</p>
+
+      <label>Email
+        <input id="loginEmail" type="email" autocomplete="username" placeholder="name@example.com">
+      </label>
+      <label>Password
+        <input id="loginPassword" type="password" autocomplete="current-password" placeholder="••••••••">
+      </label>
+
+      <button id="loginBtn" class="primary-btn full">登入</button>
+      <button id="resetPasswordBtn" class="link-btn">忘記密碼</button>
+      <p id="authMessage" class="status"></p>
+    </div>
+  </section>
+
+  <div id="appShell" class="app-shell hidden">
     <aside class="sidebar">
       <div class="brand">
         <span class="brand-mark">EC</span>
         <div>
-          <strong>日本 EC Dashboard</strong>
-          <small>CSV Analytics</small>
+          <strong>Japan EC Dashboard</strong>
+          <small>V5 Workspace BI</small>
         </div>
       </div>
 
+      <div class="workspace-box">
+        <label>Workspace</label>
+        <select id="workspaceSelect"></select>
+        <button id="newWorkspaceBtn" class="secondary-btn small">＋ 新增 Workspace</button>
+      </div>
+
       <nav class="nav">
-        <button class="nav-item active" data-section="overview">營運總覽</button>
-        <button class="nav-item" data-section="sales">銷售分析</button>
-        <button class="nav-item" data-section="products">商品分析</button>
-        <button class="nav-item" data-section="stores">店鋪／平台</button>
-        <button class="nav-item" data-section="ads">廣告分析</button>
-        <button class="nav-item" data-section="import">CSV 匯入</button>
-        <button class="nav-item" data-section="settings">欄位模板</button>
+        <button class="nav-item active" data-section="dashboard">儀表板</button>
+        <button class="nav-item" data-section="data">資料管理</button>
+        <button class="nav-item" data-section="templates">欄位模板</button>
+        <button class="nav-item" data-section="layout">版面設定</button>
+        <button class="nav-item admin-only" data-section="users">使用者</button>
       </nav>
 
-      <div class="sidebar-note">
-        CSV 只在瀏覽器中處理，不會上傳至伺服器。
+      <div class="sidebar-footer">
+        <span id="currentUserText"></span>
+        <span id="currentRoleText"></span>
+        <button id="logoutBtn" class="danger-btn small">登出</button>
       </div>
     </aside>
 
     <main class="main">
       <header class="topbar">
         <div>
-          <p class="eyebrow">JAPAN E-COMMERCE ANALYTICS</p>
-          <h1 id="pageTitle">營運總覽</h1>
+          <p class="eyebrow">WORKSPACE ANALYTICS</p>
+          <h1 id="pageTitle">儀表板</h1>
         </div>
         <div class="top-actions">
-          <span id="datasetSummary">尚未匯入資料</span>
-          <button id="goImportBtn" class="primary-btn">匯入 CSV</button>
+          <button id="themeBtn" class="icon-btn" aria-label="切換深色模式">◐</button>
+          <button id="saveLayoutBtn" class="secondary-btn">儲存版面</button>
+          <button id="goImportBtn" class="primary-btn manager-only">匯入 CSV</button>
         </div>
       </header>
 
-      <section id="overview" class="page-section active">
-        <div class="kpi-grid">
-          <article class="kpi-card"><span>總營收</span><strong id="kpiRevenue">¥0</strong></article>
-          <article class="kpi-card"><span>訂單數</span><strong id="kpiOrders">0</strong></article>
-          <article class="kpi-card"><span>平均客單價</span><strong id="kpiAov">¥0</strong></article>
-          <article class="kpi-card"><span>銷售數量</span><strong id="kpiQty">0</strong></article>
-          <article class="kpi-card"><span>商品數</span><strong id="kpiProducts">0</strong></article>
-          <article class="kpi-card"><span>廣告費</span><strong id="kpiAdCost">—</strong></article>
-          <article class="kpi-card"><span>ROAS</span><strong id="kpiRoas">—</strong></article>
-          <article class="kpi-card"><span>TACoS</span><strong id="kpiTacos">—</strong></article>
+      <section id="dashboard" class="page-section active">
+        <div class="filter-bar">
+          <label>日期欄位<select id="filterDateField"></select></label>
+          <label>分類欄位<select id="filterDimensionField"></select></label>
+          <label>分類值<select id="filterDimensionValue"><option value="">全部</option></select></label>
+          <button id="clearFilterBtn" class="secondary-btn">清除篩選</button>
         </div>
 
-        <div class="two-col">
-          <article class="panel">
-            <div class="panel-head"><div><small>TREND</small><h2>每日營收趨勢</h2></div></div>
-            <div class="chart-box"><canvas id="overviewRevenueChart"></canvas></div>
+        <div id="dashboardGrid" class="dashboard-grid">
+          <article class="widget widget-wide" data-widget="kpis">
+            <div class="widget-head">
+              <div><small>KPI</small><h2>核心指標</h2></div>
+              <span class="drag-handle">⋮⋮</span>
+            </div>
+            <div id="kpiGrid" class="kpi-grid"></div>
           </article>
-          <article class="panel">
-            <div class="panel-head"><div><small>TOP PRODUCTS</small><h2>商品營收 Top 10</h2></div></div>
-            <div class="chart-box"><canvas id="overviewProductChart"></canvas></div>
+
+          <article class="widget" data-widget="trend">
+            <div class="widget-head">
+              <div><small>TREND</small><h2>趨勢分析</h2></div>
+              <span class="drag-handle">⋮⋮</span>
+            </div>
+            <div class="widget-controls">
+              <select id="trendDateField"></select>
+              <select id="trendMetricField"></select>
+              <select id="trendChartType">
+                <option value="line">折線圖</option>
+                <option value="bar">長條圖</option>
+              </select>
+            </div>
+            <div class="chart-box"><canvas id="trendChart"></canvas></div>
+          </article>
+
+          <article class="widget" data-widget="ranking">
+            <div class="widget-head">
+              <div><small>RANKING</small><h2>排行分析</h2></div>
+              <span class="drag-handle">⋮⋮</span>
+            </div>
+            <div class="widget-controls">
+              <select id="rankingDimension"></select>
+              <select id="rankingMetric"></select>
+              <select id="rankingChartType">
+                <option value="bar">長條圖</option>
+                <option value="doughnut">圓餅圖</option>
+              </select>
+            </div>
+            <div class="chart-box"><canvas id="rankingChart"></canvas></div>
+          </article>
+
+          <article class="widget widget-wide" data-widget="table">
+            <div class="widget-head">
+              <div><small>DETAIL</small><h2>資料明細</h2></div>
+              <span class="drag-handle">⋮⋮</span>
+            </div>
+            <input id="detailSearch" class="search" type="search" placeholder="搜尋任何欄位">
+            <div class="table-wrap">
+              <table>
+                <thead id="detailHead"></thead>
+                <tbody id="detailBody"></tbody>
+              </table>
+            </div>
           </article>
         </div>
       </section>
 
-      <section id="sales" class="page-section">
-        <article class="panel">
+      <section id="data" class="page-section">
+        <article class="panel manager-only">
           <div class="panel-head">
-            <div><small>SALES</small><h2>銷售趨勢</h2></div>
-            <select id="salesMetric">
-              <option value="revenue">營收</option>
-              <option value="orders">訂單數</option>
-              <option value="quantity">銷售數量</option>
-            </select>
+            <div><small>IMPORT</small><h2>匯入 CSV</h2><p>資料只在目前瀏覽器工作階段中處理。</p></div>
           </div>
-          <div class="chart-box large"><canvas id="salesChart"></canvas></div>
-        </article>
 
-        <article class="panel">
-          <div class="panel-head">
-            <div><small>DETAIL</small><h2>銷售明細</h2></div>
-            <input id="detailSearch" class="search" type="search" placeholder="搜尋商品、訂單或 SKU">
-          </div>
-          <div class="table-wrap">
-            <table>
-              <thead>
-                <tr>
-                  <th>日期</th><th>訂單編號</th><th>商品</th><th>SKU</th>
-                  <th>數量</th><th>營收</th><th>平台</th><th>店鋪</th>
-                </tr>
-              </thead>
-              <tbody id="detailBody"></tbody>
-            </table>
-          </div>
-        </article>
-      </section>
-
-      <section id="products" class="page-section">
-        <article class="panel">
-          <div class="panel-head"><div><small>PRODUCTS</small><h2>商品銷售表</h2></div></div>
-          <div class="table-wrap">
-            <table>
-              <thead>
-                <tr><th>排名</th><th>商品</th><th>SKU</th><th>銷售數量</th><th>營收</th><th>平均售價</th><th>訂單數</th></tr>
-              </thead>
-              <tbody id="productBody"></tbody>
-            </table>
-          </div>
-        </article>
-      </section>
-
-      <section id="stores" class="page-section">
-        <div class="two-col">
-          <article class="panel">
-            <div class="panel-head"><div><small>STORE</small><h2>店鋪比較</h2></div></div>
-            <div class="chart-box"><canvas id="storeChart"></canvas></div>
-          </article>
-          <article class="panel">
-            <div class="panel-head"><div><small>PLATFORM</small><h2>平台比較</h2></div></div>
-            <div class="chart-box"><canvas id="platformChart"></canvas></div>
-          </article>
-        </div>
-      </section>
-
-      <section id="ads" class="page-section">
-        <div class="kpi-grid four">
-          <article class="kpi-card"><span>總廣告費</span><strong id="adsCost">—</strong></article>
-          <article class="kpi-card"><span>廣告營收</span><strong id="adsRevenue">—</strong></article>
-          <article class="kpi-card"><span>ROAS</span><strong id="adsRoas">—</strong></article>
-          <article class="kpi-card"><span>TACoS</span><strong id="adsTacos">—</strong></article>
-        </div>
-        <article class="panel">
-          <div class="panel-head"><div><small>ADS</small><h2>每日廣告費與營收</h2></div></div>
-          <div class="chart-box large"><canvas id="adsChart"></canvas></div>
-        </article>
-      </section>
-
-      <section id="import" class="page-section">
-        <article class="panel">
-          <div class="panel-head"><div><small>STEP 1</small><h2>選擇 CSV</h2></div></div>
           <label class="drop-zone" id="dropZone">
             <input type="file" id="csvFile" accept=".csv,text/csv">
             <strong>點擊選擇，或將 CSV 拖曳到這裡</strong>
-            <span>支援不同欄位名稱與不同平台格式</span>
+            <span>支援自訂欄位數量與不同平台格式</span>
           </label>
-          <p class="status" id="importStatus">尚未選擇檔案</p>
+          <p id="importStatus" class="status">尚未選擇檔案</p>
         </article>
 
-        <article class="panel hidden" id="mappingPanel">
+        <article id="mappingPanel" class="panel hidden manager-only">
           <div class="panel-head">
-            <div><small>STEP 2</small><h2>欄位對應</h2><p>必要欄位：日期、訂單編號、商品名稱、數量、營收</p></div>
-            <select id="templateSelect"><option value="">選擇既有模板</option></select>
+            <div><small>MAPPING</small><h2>欄位對應</h2></div>
+            <select id="templateSelect"><option value="">選擇欄位模板</option></select>
           </div>
 
-          <div class="mapping-grid">
-            <label>日期<select id="mapDate"></select></label>
-            <label>訂單編號<select id="mapOrderId"></select></label>
-            <label>商品名稱<select id="mapProduct"></select></label>
-            <label>SKU／商品管理編號<select id="mapSku"></select></label>
-            <label>數量<select id="mapQuantity"></select></label>
-            <label>營收<select id="mapRevenue"></select></label>
-            <label>平台<select id="mapPlatform"></select></label>
-            <label>店鋪<select id="mapStore"></select></label>
-            <label>廣告費<select id="mapAdCost"></select></label>
-            <label>廣告營收<select id="mapAdRevenue"></select></label>
-          </div>
-
-          <div class="action-row">
-            <button id="analyzeBtn" class="primary-btn">加入分析資料</button>
-            <button id="replaceBtn" class="secondary-btn">清除舊資料後分析</button>
+          <div id="fieldRows" class="field-rows"></div>
+          <div class="action-row split">
+            <button id="addFieldBtn" class="secondary-btn">＋ 新增欄位</button>
+            <div>
+              <button id="appendDataBtn" class="primary-btn">加入資料</button>
+              <button id="replaceDataBtn" class="secondary-btn">清除後匯入</button>
+            </div>
           </div>
         </article>
 
         <article class="panel">
-          <div class="panel-head"><div><small>SESSION</small><h2>本次已匯入檔案</h2></div><button id="clearDataBtn" class="danger-btn">清除全部資料</button></div>
-          <div id="fileList" class="file-list"><p>尚未匯入任何 CSV。</p></div>
+          <div class="panel-head">
+            <div><small>SESSION</small><h2>目前資料</h2></div>
+            <button id="clearDataBtn" class="danger-btn manager-only">清除全部資料</button>
+          </div>
+          <div id="fileList" class="file-list"></div>
         </article>
       </section>
 
-      <section id="settings" class="page-section">
-        <article class="panel">
-          <div class="panel-head"><div><small>TEMPLATES</small><h2>欄位模板</h2><p>不同格式的 CSV 可以各自儲存一組欄位對應。</p></div></div>
-
+      <section id="templates" class="page-section">
+        <article class="panel manager-only">
+          <div class="panel-head">
+            <div><small>TEMPLATES</small><h2>欄位模板</h2><p>每個 Workspace 可使用不同模板。</p></div>
+          </div>
           <div class="template-form">
-            <input id="templateName" type="text" placeholder="例如：楽天注文CSV、Amazon訂單">
+            <input id="templateName" type="text" placeholder="例如：楽天訂單、RPP廣告">
             <button id="saveTemplateBtn" class="primary-btn">儲存目前欄位設定</button>
           </div>
-
           <div id="templateList" class="template-list"></div>
+        </article>
+      </section>
+
+      <section id="layout" class="page-section">
+        <article class="panel">
+          <div class="panel-head">
+            <div><small>LAYOUT</small><h2>儀表板版面</h2><p>回到儀表板拖曳卡片，再按「儲存版面」。</p></div>
+          </div>
+          <div class="setting-grid">
+            <label>每頁明細筆數
+              <select id="tableLimit">
+                <option value="100">100</option>
+                <option value="300">300</option>
+                <option value="500" selected>500</option>
+              </select>
+            </label>
+            <label>KPI 顯示上限
+              <select id="kpiLimit">
+                <option value="4">4</option>
+                <option value="6">6</option>
+                <option value="8" selected>8</option>
+              </select>
+            </label>
+          </div>
+        </article>
+      </section>
+
+      <section id="users" class="page-section">
+        <article class="panel admin-only">
+          <div class="panel-head">
+            <div><small>USERS</small><h2>使用者與權限</h2><p>角色資料讀取自 Firestore 的 users 集合。</p></div>
+          </div>
+          <div id="userList" class="template-list"></div>
         </article>
       </section>
     </main>
   </div>
 
-  <script src="script.js"></script>
+  <template id="fieldRowTemplate">
+    <div class="field-row">
+      <input class="field-label" type="text" placeholder="顯示名稱">
+      <select class="field-type">
+        <option value="dimension">分類／文字</option>
+        <option value="number">數值</option>
+        <option value="date">日期</option>
+        <option value="id">識別碼</option>
+      </select>
+      <select class="field-source"></select>
+      <label class="required-check"><input class="field-required" type="checkbox"> 必填</label>
+      <button class="remove-field danger-btn" type="button">刪除</button>
+    </div>
+  </template>
+
+  <script type="module" src="app.js"></script>
 </body>
 </html>

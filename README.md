@@ -1,73 +1,150 @@
-# 日本 EC Dashboard V2
+# Japan EC Dashboard V5
 
-這是一個部署於 GitHub Pages 的純前端 CSV 分析儀表板。
+V5 是可部署在 GitHub Pages 的 Workspace 型 CSV BI 儀表板。
 
-## 本版本功能
+## 功能
 
-- 左側分區選單
-- 營運總覽
-- 銷售分析
-- 商品銷售表
-- 店鋪／平台比較
-- 廣告分析
-- CSV 匯入管理
-- 不同格式 CSV 欄位對應
-- 欄位模板儲存
-- 可連續匯入多個 CSV 並合併分析
-- 可選擇保留舊資料或清除後重新分析
-- 不包含 API 自動匯入
+- Firebase Email / Password 登入
+- 忘記密碼
+- Admin / Manager / Viewer 角色顯示控制
+- 多 Workspace
+- CSV 自訂欄位對應
+- 欄位模板
+- KPI 卡片
+- 趨勢圖
+- 排行圖
+- 圓餅圖／長條圖／折線圖
+- 全域篩選
+- 可拖曳儀表板元件
+- 儲存每個 Workspace 的版面
+- 深色模式
+- 明細搜尋
+- 響應式手機版
 
-## 使用方式
+## 重要限制
 
-1. 點選「CSV 匯入」。
-2. 上傳 CSV。
-3. 在「欄位對應」選擇正確欄位。
-4. 若要把資料合併到現有資料，按「加入分析資料」。
-5. 若要清除舊資料，按「清除舊資料後分析」。
-6. 到各分區查看分析結果。
+1. CSV 與分析資料儲存在瀏覽器 localStorage／目前工作階段，不會同步到其他電腦。
+2. Firebase 負責登入、使用者角色與 Workspace 名稱。
+3. 若要跨裝置同步 CSV 資料，需要另外加入 Firestore 或雲端儲存資料流程。
+4. GitHub Pages 專案程式碼仍是公開的，但 Firebase 不會把密碼寫在程式碼中。
 
-## 不同格式 CSV
+## 第一步：建立 Firebase 專案
 
-不同平台的 CSV 欄位名稱可以不同。只要在匯入時對應到下列標準欄位即可：
+1. 進入 Firebase Console。
+2. 建立專案。
+3. 建立 Web App。
+4. 開啟 Authentication。
+5. Sign-in method 開啟 Email/Password。
+6. 建立第一個登入帳號。
 
-必要：
-- 日期
-- 訂單編號
-- 商品名稱
-- 數量
-- 營收
+## 第二步：設定 firebase-config.js
 
-選用：
-- SKU／商品管理編號
-- 平台
-- 店鋪
-- 廣告費
-- 廣告營收
+將：
 
-## 欄位模板
+`firebase-config.example.js`
 
-在完成欄位對應後，到「欄位模板」輸入名稱並儲存。
+複製並改名為：
 
-例如：
-- 楽天注文CSV
-- Amazon訂單
-- Shopify銷售資料
+`firebase-config.js`
 
-模板會儲存在目前瀏覽器的 localStorage 中，不會上傳到 GitHub。
+填入 Firebase Web App 的設定。
 
-## GitHub 更新方式
+## 第三步：建立 Firestore
 
-1. 解壓縮 ZIP。
-2. 回到 Repository。
-3. 點 `Add file` → `Upload files`。
-4. 將以下檔案上傳並覆蓋：
-   - `index.html`
-   - `style.css`
-   - `script.js`
-   - `README.md`
-5. 點 `Commit changes`。
-6. 等待 GitHub Pages 更新。
+建立 Firestore Database，並建立以下集合。
 
-## 資料安全
+### users
 
-CSV 只在使用者的瀏覽器內處理。重新整理頁面後，本次匯入資料會消失；欄位模板會保留在該瀏覽器中。
+文件 ID 必須是 Firebase Authentication 使用者 UID。
+
+範例：
+
+```json
+{
+  "email": "admin@example.com",
+  "role": "admin"
+}
+```
+
+role 可使用：
+
+- admin
+- manager
+- viewer
+
+### workspaces
+
+文件名稱可自訂，例如：
+
+`rakuten`
+
+內容：
+
+```json
+{
+  "name": "Rakuten"
+}
+```
+
+## Firestore Rules 範例
+
+以下規則適合初期測試。正式使用前應依公司需求調整。
+
+```text
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    match /users/{userId} {
+      allow read: if request.auth != null;
+      allow write: if false;
+    }
+
+    match /workspaces/{workspaceId} {
+      allow read: if request.auth != null;
+      allow create: if request.auth != null
+                    && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == "admin";
+      allow update, delete: if request.auth != null
+                    && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == "admin";
+    }
+  }
+}
+```
+
+## GitHub Pages 部署
+
+將以下檔案上傳到 Repository 根目錄：
+
+- index.html
+- style.css
+- app.js
+- firebase-config.js
+- README.md
+- sample-sales.csv
+
+GitHub Pages 設定：
+
+- Source: Deploy from a branch
+- Branch: main
+- Folder: / (root)
+
+## 權限說明
+
+### Admin
+
+- 查看 Dashboard
+- 匯入 CSV
+- 修改模板
+- 建立 Workspace
+- 查看使用者清單
+
+### Manager
+
+- 查看 Dashboard
+- 匯入 CSV
+- 修改模板
+
+### Viewer
+
+- 查看 Dashboard
+
+前端權限主要控制介面顯示。真正的資料安全仍必須搭配 Firestore Security Rules。
