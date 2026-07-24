@@ -1,86 +1,73 @@
-# 日本電商營運儀表板
+# 日本 EC Dashboard V2
 
-這是一個可部署在 GitHub Pages 的前端 CSV 分析工具。
+這是一個部署於 GitHub Pages 的純前端 CSV 分析儀表板。
 
-## 功能
+## 本版本功能
 
-- 上傳日文 CSV
-- 自動讀取所有欄位
-- 自動判斷常見日文欄位名稱
-- 手動選擇欄位對應
-- 儲存欄位設定到瀏覽器
-- 顯示總營收、訂單數、平均客單價、銷售數量、商品數
-- 有廣告費欄位時，自動計算 ROAS 與 TACoS
-- 顯示每日營收趨勢
-- 顯示商品營收 Top 10
-- 顯示與搜尋資料明細
+- 左側分區選單
+- 營運總覽
+- 銷售分析
+- 商品銷售表
+- 店鋪／平台比較
+- 廣告分析
+- CSV 匯入管理
+- 不同格式 CSV 欄位對應
+- 欄位模板儲存
+- 可連續匯入多個 CSV 並合併分析
+- 可選擇保留舊資料或清除後重新分析
+- 不包含 API 自動匯入
 
 ## 使用方式
 
-1. 開啟網站。
+1. 點選「CSV 匯入」。
 2. 上傳 CSV。
-3. 確認欄位對應。
-4. 按下「開始分析」。
+3. 在「欄位對應」選擇正確欄位。
+4. 若要把資料合併到現有資料，按「加入分析資料」。
+5. 若要清除舊資料，按「清除舊資料後分析」。
+6. 到各分區查看分析結果。
 
-CSV 只會在目前使用者的瀏覽器內處理，不會自動上傳到 GitHub 或其他伺服器。
+## 不同格式 CSV
 
-## GitHub 上傳步驟
+不同平台的 CSV 欄位名稱可以不同。只要在匯入時對應到下列標準欄位即可：
 
-1. 先將下載的 ZIP 解壓縮。
-2. 打開 GitHub Repository。
-3. 點選 `uploading an existing file`，或 `Add file` → `Upload files`。
-4. 將解壓縮後的以下檔案拖入：
-   - `index.html`
-   - `style.css`
-   - `script.js`
-   - `README.md`
-   - `sample-sales.csv`
-5. 不要直接上傳 ZIP。
-6. 點擊 `Commit changes`。
-
-## 啟用 GitHub Pages
-
-1. 進入 Repository 的 `Settings`。
-2. 左側選擇 `Pages`。
-3. `Source` 選擇 `Deploy from a branch`。
-4. Branch 選擇 `main`。
-5. Folder 選擇 `/ (root)`。
-6. 點擊 `Save`。
-
-網站網址通常是：
-
-`https://你的GitHub帳號.github.io/rakuten_jp/`
-
-## CSV 必要欄位
-
-程式不要求固定名稱，但分析前至少要指定：
-
+必要：
 - 日期
 - 訂單編號
 - 商品名稱
 - 數量
 - 營收
 
-可選欄位：
-
+選用：
 - SKU／商品管理編號
 - 平台
 - 店鋪
 - 廣告費
+- 廣告營收
 
+## 欄位模板
 
-## 登入畫面
+在完成欄位對應後，到「欄位模板」輸入名稱並儲存。
 
-預設密碼：
+例如：
+- 楽天注文CSV
+- Amazon訂單
+- Shopify銷售資料
 
-`ChangeMe2026!`
+模板會儲存在目前瀏覽器的 localStorage 中，不會上傳到 GitHub。
 
-修改方式：打開 `script.js`，將最上方這一行：
+## GitHub 更新方式
 
-```javascript
-const APP_PASSWORD = "ChangeMe2026!";
-```
+1. 解壓縮 ZIP。
+2. 回到 Repository。
+3. 點 `Add file` → `Upload files`。
+4. 將以下檔案上傳並覆蓋：
+   - `index.html`
+   - `style.css`
+   - `script.js`
+   - `README.md`
+5. 點 `Commit changes`。
+6. 等待 GitHub Pages 更新。
 
-改成自己的密碼，儲存後重新上傳 `script.js`。
+## 資料安全
 
-注意：這是純前端密碼保護。公開 Repository 的原始碼仍可被查看，因此它只能阻擋一般訪客，不適合保護高度機密資料、客戶個資、API 金鑰或帳號密碼。
+CSV 只在使用者的瀏覽器內處理。重新整理頁面後，本次匯入資料會消失；欄位模板會保留在該瀏覽器中。

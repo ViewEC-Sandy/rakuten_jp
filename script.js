@@ -1,467 +1,102 @@
-/*
-  請把下方 jpRakuTen2026! 改成你自己的密碼。
-  注意：這是前端密碼，只能阻擋一般訪客。
-*/
-const APP_PASSWORD = "ChangeMe2026!";
-
-const loginScreen = document.getElementById("loginScreen");
-const appContent = document.getElementById("appContent");
-const loginForm = document.getElementById("loginForm");
-const loginPassword = document.getElementById("loginPassword");
-const loginMessage = document.getElementById("loginMessage");
-
-function unlockApp() {
-  loginScreen.classList.add("hidden");
-  appContent.classList.remove("hidden");
-}
-
-if (sessionStorage.getItem("dashboardAuthenticated") === "yes") {
-  unlockApp();
-}
-
-loginForm.addEventListener("submit", event => {
-  event.preventDefault();
-
-  if (loginPassword.value === APP_PASSWORD) {
-    sessionStorage.setItem("dashboardAuthenticated", "yes");
-    loginMessage.textContent = "";
-    loginPassword.value = "";
-    unlockApp();
-  } else {
-    loginMessage.textContent = "密碼錯誤，請重新輸入。";
-    loginPassword.select();
-  }
-});
-
-const state = {
-  rawRows: [],
-  headers: [],
-  analyzedRows: [],
-  revenueChart: null,
-  productChart: null
+const state={rawRows:[],headers:[],rows:[],files:[],charts:{},currentFileName:""};
+const aliases={
+date:["注文日","受注日","購入日","売上日","日付","date","created at","purchase-date"],
+orderId:["注文番号","受注番号","オーダー番号","order_id","order-id","order"],
+product:["商品名","商品名称","品名","lineitem name","product-name","product"],
+sku:["商品管理番号","商品番号","SKU","sku","商品コード","管理番号"],
+quantity:["個数","数量","注文個数","販売数量","quantity","lineitem quantity"],
+revenue:["商品金額","売上金額","売上金額（すべて）","売上金額 (すべて)","請求金額","合計金額","金額","売上","total","item-price","revenue"],
+platform:["プラットフォーム","モール","販売チャネル","platform","channel"],
+store:["店舗","店舗名","ショップ","ショップ名","store"],
+adCost:["広告費","広告コスト","RPP広告費","ad_cost","advertising cost"],
+adRevenue:["広告売上","広告経由売上","RPP売上","ad_revenue","attributed sales"]
 };
+const mapIds={date:"mapDate",orderId:"mapOrderId",product:"mapProduct",sku:"mapSku",quantity:"mapQuantity",revenue:"mapRevenue",platform:"mapPlatform",store:"mapStore",adCost:"mapAdCost",adRevenue:"mapAdRevenue"};
+const titles={overview:"營運總覽",sales:"銷售分析",products:"商品分析",stores:"店鋪／平台",ads:"廣告分析",import:"CSV 匯入",settings:"欄位模板"};
 
-const aliases = {
-  date: ["注文日", "受注日", "購入日", "売上日", "日付", "date", "created at", "purchase-date"],
-  orderId: ["注文番号", "受注番号", "オーダー番号", "order_id", "order-id", "order"],
-  product: ["商品名", "商品名称", "品名", "lineitem name", "product-name", "product"],
-  sku: ["商品管理番号", "商品番号", "SKU", "sku", "商品コード", "管理番号"],
-  quantity: ["個数", "数量", "注文個数", "販売数量", "quantity", "lineitem quantity"],
-  revenue: ["商品金額", "売上金額", "請求金額", "合計金額", "金額", "売上", "total", "item-price", "revenue"],
-  platform: ["プラットフォーム", "モール", "販売チャネル", "platform", "channel"],
-  store: ["店舗", "店舗名", "ショップ", "ショップ名", "store"],
-  adCost: ["広告費", "広告コスト", "RPP広告費", "ad_cost", "advertising cost"]
-};
+document.querySelectorAll(".nav-item").forEach(btn=>btn.addEventListener("click",()=>showSection(btn.dataset.section)));
+document.getElementById("goImportBtn").addEventListener("click",()=>showSection("import"));
+function showSection(id){document.querySelectorAll(".nav-item").forEach(b=>b.classList.toggle("active",b.dataset.section===id));document.querySelectorAll(".page-section").forEach(s=>s.classList.toggle("active",s.id===id));document.getElementById("pageTitle").textContent=titles[id]||"";if(id==="settings")renderTemplates()}
 
-const ids = {
-  date: "mapDate",
-  orderId: "mapOrderId",
-  product: "mapProduct",
-  sku: "mapSku",
-  quantity: "mapQuantity",
-  revenue: "mapRevenue",
-  platform: "mapPlatform",
-  store: "mapStore",
-  adCost: "mapAdCost"
-};
+const csvFile=document.getElementById("csvFile"),dropZone=document.getElementById("dropZone"),statusEl=document.getElementById("importStatus");
+csvFile.addEventListener("change",e=>e.target.files?.[0]&&loadCsv(e.target.files[0]));
+["dragenter","dragover"].forEach(n=>dropZone.addEventListener(n,e=>{e.preventDefault();dropZone.classList.add("dragover")}));
+["dragleave","drop"].forEach(n=>dropZone.addEventListener(n,e=>{e.preventDefault();dropZone.classList.remove("dragover")}));
+dropZone.addEventListener("drop",e=>e.dataTransfer.files?.[0]&&loadCsv(e.dataTransfer.files[0]));
 
-const csvFile = document.getElementById("csvFile");
-const dropZone = document.getElementById("dropZone");
-const fileName = document.getElementById("fileName");
-const message = document.getElementById("message");
-const mappingSection = document.getElementById("mappingSection");
-const dashboard = document.getElementById("dashboard");
-const tableSearch = document.getElementById("tableSearch");
+function loadCsv(file){
+state.currentFileName=file.name;statusEl.textContent=`正在讀取：${file.name}`;
+Papa.parse(file,{header:true,skipEmptyLines:"greedy",dynamicTyping:false,complete:r=>{
+if(!r.meta.fields?.length){statusEl.textContent="找不到欄位名稱，請確認第一列為標題列。";return}
+state.rawRows=r.data;state.headers=r.meta.fields.map(x=>String(x).trim());buildMappingOptions();autoMap();document.getElementById("mappingPanel").classList.remove("hidden");statusEl.textContent=`${file.name}：${state.rawRows.length} 筆資料`;refreshTemplateSelect()
+},error:e=>statusEl.textContent=`讀取失敗：${e.message}`})
+}
+function buildMappingOptions(){Object.values(mapIds).forEach(id=>{const s=document.getElementById(id);s.innerHTML='<option value="">不使用此欄位</option>'+state.headers.map(h=>`<option value="${escAttr(h)}">${esc(h)}</option>`).join("")})}
+function autoMap(){Object.entries(mapIds).forEach(([k,id])=>{document.getElementById(id).value=findHeader(aliases[k]||[])||""})}
+function findHeader(candidates){const hs=state.headers.map(h=>({o:h,n:norm(h)}));for(const c of candidates){const x=hs.find(i=>i.n===norm(c));if(x)return x.o}for(const c of candidates){const x=hs.find(i=>i.n.includes(norm(c))||norm(c).includes(i.n));if(x)return x.o}return""}
+function getMapping(){const m={};Object.entries(mapIds).forEach(([k,id])=>m[k]=document.getElementById(id).value);return m}
 
-csvFile.addEventListener("change", event => {
-  const file = event.target.files?.[0];
-  if (file) loadCsv(file);
-});
-
-["dragenter", "dragover"].forEach(eventName => {
-  dropZone.addEventListener(eventName, event => {
-    event.preventDefault();
-    dropZone.classList.add("dragover");
-  });
-});
-
-["dragleave", "drop"].forEach(eventName => {
-  dropZone.addEventListener(eventName, event => {
-    event.preventDefault();
-    dropZone.classList.remove("dragover");
-  });
-});
-
-dropZone.addEventListener("drop", event => {
-  const file = event.dataTransfer.files?.[0];
-  if (file) loadCsv(file);
-});
-
-document.getElementById("analyzeBtn").addEventListener("click", analyze);
-document.getElementById("saveMappingBtn").addEventListener("click", saveMapping);
-document.getElementById("resetMappingBtn").addEventListener("click", () => {
-  localStorage.removeItem("rakutenJpDashboardMapping");
-  autoMapFields();
-  setMessage("已清除儲存設定。", "success");
-});
-tableSearch.addEventListener("input", renderTable);
-
-function loadCsv(file) {
-  fileName.textContent = `已選擇：${file.name}`;
-  setMessage("正在讀取 CSV…");
-
-  Papa.parse(file, {
-    header: true,
-    skipEmptyLines: "greedy",
-    dynamicTyping: false,
-    encoding: "",
-    complete(results) {
-      try {
-        if (!results.meta.fields?.length) {
-          throw new Error("找不到欄位名稱，請確認 CSV 第一列是標題列。");
-        }
-
-        state.rawRows = results.data;
-        state.headers = results.meta.fields.map(h => String(h).trim());
-
-        buildMappingOptions();
-        autoMapFields();
-        mappingSection.classList.remove("hidden");
-        dashboard.classList.add("hidden");
-
-        const warning = results.errors?.length
-          ? `（另有 ${results.errors.length} 筆格式警告）`
-          : "";
-
-        setMessage(`讀取完成，共 ${state.rawRows.length} 筆資料 ${warning}`, "success");
-      } catch (error) {
-        setMessage(error.message, "error");
-      }
-    },
-    error(error) {
-      setMessage(`讀取失敗：${error.message}`, "error");
-    }
-  });
+document.getElementById("analyzeBtn").addEventListener("click",()=>importRows(false));
+document.getElementById("replaceBtn").addEventListener("click",()=>importRows(true));
+function importRows(replace){
+const m=getMapping(),required=["date","orderId","product","quantity","revenue"];if(required.some(k=>!m[k])){statusEl.textContent="請指定日期、訂單編號、商品名稱、數量與營收。";return}
+const rows=state.rawRows.map(r=>({date:dateVal(r[m.date]),orderId:text(r[m.orderId]),product:text(r[m.product]),sku:m.sku?text(r[m.sku]):"",quantity:num(r[m.quantity]),revenue:num(r[m.revenue]),platform:m.platform?text(r[m.platform]):"",store:m.store?text(r[m.store]):"",adCost:m.adCost?num(r[m.adCost]):0,adRevenue:m.adRevenue?num(r[m.adRevenue]):0})).filter(r=>r.date||r.orderId||r.product);
+if(replace){state.rows=[];state.files=[]}
+state.rows.push(...rows);state.files.push({name:state.currentFileName,count:rows.length});statusEl.textContent=`已加入 ${rows.length} 筆資料`;updateAll();showSection("overview")
 }
 
-function buildMappingOptions() {
-  Object.values(ids).forEach(selectId => {
-    const select = document.getElementById(selectId);
-    select.innerHTML = "";
+document.getElementById("clearDataBtn").addEventListener("click",()=>{state.rows=[];state.files=[];updateAll();renderFileList()});
+document.getElementById("detailSearch").addEventListener("input",renderDetail);
+document.getElementById("salesMetric").addEventListener("change",renderSalesChart);
 
-    const empty = document.createElement("option");
-    empty.value = "";
-    empty.textContent = "不使用此欄位";
-    select.appendChild(empty);
-
-    state.headers.forEach(header => {
-      const option = document.createElement("option");
-      option.value = header;
-      option.textContent = header;
-      select.appendChild(option);
-    });
-  });
+function updateAll(){updateKpis();renderOverviewCharts();renderSalesChart();renderDetail();renderProducts();renderStorePlatform();renderAds();renderFileList();document.getElementById("datasetSummary").textContent=state.rows.length?`${state.rows.length.toLocaleString()} 筆資料／${state.files.length} 個檔案`:"尚未匯入資料"}
+function updateKpis(){
+const rev=sum(state.rows.map(r=>r.revenue)),qty=sum(state.rows.map(r=>r.quantity)),ad=sum(state.rows.map(r=>r.adCost)),orders=new Set(state.rows.map(r=>r.orderId).filter(Boolean)).size,products=new Set(state.rows.map(r=>r.sku||r.product).filter(Boolean)).size,aov=orders?rev/orders:0;
+set("kpiRevenue",yen(rev));set("kpiOrders",fmt(orders));set("kpiAov",yen(aov));set("kpiQty",fmt(qty));set("kpiProducts",fmt(products));set("kpiAdCost",ad?yen(ad):"—");set("kpiRoas",ad?`${(rev/ad*100).toFixed(1)}%`:"—");set("kpiTacos",rev&&ad?`${(ad/rev*100).toFixed(1)}%`:"—")
 }
-
-function autoMapFields() {
-  const saved = JSON.parse(localStorage.getItem("rakutenJpDashboardMapping") || "{}");
-
-  Object.entries(ids).forEach(([key, selectId]) => {
-    const select = document.getElementById(selectId);
-
-    if (saved[key] && state.headers.includes(saved[key])) {
-      select.value = saved[key];
-      return;
-    }
-
-    const matched = findHeader(aliases[key] || []);
-    select.value = matched || "";
-  });
+function renderOverviewCharts(){
+const daily=group(state.rows,r=>r.date,r=>r.revenue),prod=topGroup(state.rows,r=>r.product,r=>r.revenue,10);
+chart("overviewRevenueChart","line",Object.keys(daily).sort(),Object.keys(daily).sort().map(k=>daily[k]),"營收");
+chart("overviewProductChart","bar",prod.map(x=>x[0]),prod.map(x=>x[1]),"營收",true)
 }
-
-function findHeader(candidates) {
-  const normalizedHeaders = state.headers.map(header => ({
-    original: header,
-    normalized: normalize(header)
-  }));
-
-  for (const candidate of candidates) {
-    const exact = normalizedHeaders.find(item => item.normalized === normalize(candidate));
-    if (exact) return exact.original;
-  }
-
-  for (const candidate of candidates) {
-    const partial = normalizedHeaders.find(item =>
-      item.normalized.includes(normalize(candidate)) ||
-      normalize(candidate).includes(item.normalized)
-    );
-    if (partial) return partial.original;
-  }
-
-  return "";
+function renderSalesChart(){
+const metric=document.getElementById("salesMetric").value,d={};
+state.rows.forEach(r=>{d[r.date]??={revenue:0,quantity:0,orders:new Set()};d[r.date].revenue+=r.revenue;d[r.date].quantity+=r.quantity;if(r.orderId)d[r.date].orders.add(r.orderId)});
+const labels=Object.keys(d).sort(),vals=labels.map(k=>metric==="orders"?d[k].orders.size:d[k][metric]);chart("salesChart","line",labels,vals,metric)
 }
-
-function saveMapping() {
-  const mapping = getMapping();
-  localStorage.setItem("rakutenJpDashboardMapping", JSON.stringify(mapping));
-  setMessage("欄位設定已儲存在這台瀏覽器。", "success");
+function renderDetail(){
+const q=document.getElementById("detailSearch").value.toLowerCase();const body=document.getElementById("detailBody");
+body.innerHTML=state.rows.filter(r=>!q||[r.date,r.orderId,r.product,r.sku,r.platform,r.store].some(v=>String(v).toLowerCase().includes(q))).slice(0,500).map(r=>`<tr><td>${esc(r.date)}</td><td>${esc(r.orderId)}</td><td>${esc(r.product)}</td><td>${esc(r.sku)}</td><td>${fmt(r.quantity)}</td><td>${yen(r.revenue)}</td><td>${esc(r.platform)}</td><td>${esc(r.store)}</td></tr>`).join("")
 }
-
-function getMapping() {
-  const mapping = {};
-  Object.entries(ids).forEach(([key, selectId]) => {
-    mapping[key] = document.getElementById(selectId).value;
-  });
-  return mapping;
+function renderProducts(){
+const m={};state.rows.forEach(r=>{const k=r.sku||r.product;if(!m[k])m[k]={product:r.product,sku:r.sku,qty:0,rev:0,orders:new Set()};m[k].qty+=r.quantity;m[k].rev+=r.revenue;if(r.orderId)m[k].orders.add(r.orderId)});
+document.getElementById("productBody").innerHTML=Object.values(m).sort((a,b)=>b.rev-a.rev).map((x,i)=>`<tr><td>${i+1}</td><td>${esc(x.product)}</td><td>${esc(x.sku)}</td><td>${fmt(x.qty)}</td><td>${yen(x.rev)}</td><td>${yen(x.qty?x.rev/x.qty:0)}</td><td>${fmt(x.orders.size)}</td></tr>`).join("")
 }
-
-function analyze() {
-  const mapping = getMapping();
-  const required = ["date", "orderId", "product", "quantity", "revenue"];
-  const missing = required.filter(key => !mapping[key]);
-
-  if (missing.length) {
-    setMessage("請至少指定日期、訂單編號、商品名稱、數量與營收欄位。", "error");
-    return;
-  }
-
-  state.analyzedRows = state.rawRows
-    .map(row => ({
-      date: normalizeDate(row[mapping.date]),
-      orderId: cleanText(row[mapping.orderId]),
-      product: cleanText(row[mapping.product]),
-      sku: mapping.sku ? cleanText(row[mapping.sku]) : "",
-      quantity: toNumber(row[mapping.quantity]),
-      revenue: toNumber(row[mapping.revenue]),
-      platform: mapping.platform ? cleanText(row[mapping.platform]) : "",
-      store: mapping.store ? cleanText(row[mapping.store]) : "",
-      adCost: mapping.adCost ? toNumber(row[mapping.adCost]) : 0
-    }))
-    .filter(row => row.date || row.orderId || row.product);
-
-  if (!state.analyzedRows.length) {
-    setMessage("沒有可分析的資料，請檢查欄位選擇。", "error");
-    return;
-  }
-
-  updateKpis(mapping);
-  renderRevenueChart();
-  renderProductChart();
-  renderTable();
-  dashboard.classList.remove("hidden");
-  dashboard.scrollIntoView({ behavior: "smooth", block: "start" });
-  setMessage(`分析完成，共 ${state.analyzedRows.length} 筆資料。`, "success");
+function renderStorePlatform(){
+const s=topGroup(state.rows,r=>r.store||"未設定",r=>r.revenue,20),p=topGroup(state.rows,r=>r.platform||"未設定",r=>r.revenue,20);
+chart("storeChart","bar",s.map(x=>x[0]),s.map(x=>x[1]),"營收",true);chart("platformChart","bar",p.map(x=>x[0]),p.map(x=>x[1]),"營收",true)
 }
-
-function updateKpis(mapping) {
-  const totalRevenue = sum(state.analyzedRows.map(row => row.revenue));
-  const totalQuantity = sum(state.analyzedRows.map(row => row.quantity));
-  const totalAdCost = sum(state.analyzedRows.map(row => row.adCost));
-  const orders = new Set(state.analyzedRows.map(row => row.orderId).filter(Boolean));
-  const products = new Set(state.analyzedRows.map(row => row.sku || row.product).filter(Boolean));
-  const orderCount = orders.size;
-  const aov = orderCount ? totalRevenue / orderCount : 0;
-
-  setText("totalRevenue", yen(totalRevenue));
-  setText("totalOrders", number(orderCount));
-  setText("aov", yen(aov));
-  setText("totalQuantity", number(totalQuantity));
-  setText("productCount", number(products.size));
-
-  if (mapping.adCost) {
-    setText("totalAdCost", yen(totalAdCost));
-    setText("roas", totalAdCost > 0 ? `${(totalRevenue / totalAdCost * 100).toFixed(1)}%` : "—");
-    setText("tacos", totalRevenue > 0 ? `${(totalAdCost / totalRevenue * 100).toFixed(1)}%` : "—");
-  } else {
-    setText("totalAdCost", "—");
-    setText("roas", "—");
-    setText("tacos", "—");
-  }
+function renderAds(){
+const ad=sum(state.rows.map(r=>r.adCost)),rev=sum(state.rows.map(r=>r.revenue)),adRev=sum(state.rows.map(r=>r.adRevenue));
+set("adsCost",ad?yen(ad):"—");set("adsRevenue",adRev?yen(adRev):"—");set("adsRoas",ad?(adRev?`${(adRev/ad*100).toFixed(1)}%`:`${(rev/ad*100).toFixed(1)}%`):"—");set("adsTacos",ad&&rev?`${(ad/rev*100).toFixed(1)}%`:"—");
+const d={};state.rows.forEach(r=>{d[r.date]??={ad:0,rev:0};d[r.date].ad+=r.adCost;d[r.date].rev+=r.revenue});const labels=Object.keys(d).sort();
+destroy("adsChart");state.charts.adsChart=new Chart(document.getElementById("adsChart"),{type:"bar",data:{labels,datasets:[{label:"廣告費",data:labels.map(k=>d[k].ad)},{label:"營收",data:labels.map(k=>d[k].rev),type:"line",tension:.25}]},options:{responsive:true,maintainAspectRatio:false}})
 }
+function renderFileList(){document.getElementById("fileList").innerHTML=state.files.length?state.files.map((f,i)=>`<div class="file-item"><div><strong>${esc(f.name)}</strong><small>${fmt(f.count)} 筆資料</small></div></div>`).join(""):"<p>尚未匯入任何 CSV。</p>"}
 
-function renderRevenueChart() {
-  const grouped = {};
+document.getElementById("saveTemplateBtn").addEventListener("click",()=>{const name=document.getElementById("templateName").value.trim();if(!name)return alert("請輸入模板名稱");const t=getTemplates();t[name]=getMapping();localStorage.setItem("ecDashboardTemplates",JSON.stringify(t));document.getElementById("templateName").value="";renderTemplates();refreshTemplateSelect()});
+document.getElementById("templateSelect").addEventListener("change",e=>{const t=getTemplates()[e.target.value];if(t)Object.entries(mapIds).forEach(([k,id])=>{if(state.headers.includes(t[k]))document.getElementById(id).value=t[k]||""})});
+function getTemplates(){return JSON.parse(localStorage.getItem("ecDashboardTemplates")||"{}")}
+function renderTemplates(){const t=getTemplates(),el=document.getElementById("templateList");el.innerHTML=Object.keys(t).length?Object.keys(t).map(n=>`<div class="template-item"><div><strong>${esc(n)}</strong><small>已儲存在此瀏覽器</small></div><button class="danger-btn" onclick="deleteTemplate('${escAttr(n)}')">刪除</button></div>`).join(""):"<p>尚未建立模板。</p>"}
+window.deleteTemplate=n=>{const t=getTemplates();delete t[n];localStorage.setItem("ecDashboardTemplates",JSON.stringify(t));renderTemplates();refreshTemplateSelect()}
+function refreshTemplateSelect(){const s=document.getElementById("templateSelect"),t=getTemplates();s.innerHTML='<option value="">選擇既有模板</option>'+Object.keys(t).map(n=>`<option value="${escAttr(n)}">${esc(n)}</option>`).join("")}
 
-  state.analyzedRows.forEach(row => {
-    const key = row.date || "日期不明";
-    grouped[key] = (grouped[key] || 0) + row.revenue;
-  });
-
-  const labels = Object.keys(grouped).sort((a, b) => a.localeCompare(b));
-  const values = labels.map(label => grouped[label]);
-
-  state.revenueChart?.destroy();
-
-  state.revenueChart = new Chart(document.getElementById("revenueChart"), {
-    type: "line",
-    data: {
-      labels,
-      datasets: [{
-        label: "營收",
-        data: values,
-        borderWidth: 3,
-        tension: .28,
-        fill: true,
-        backgroundColor: "rgba(47,111,237,.10)",
-        borderColor: "#2f6fed",
-        pointRadius: 2
-      }]
-    },
-    options: {
-      responsive: true,
-      maintainAspectRatio: false,
-      plugins: {
-        tooltip: {
-          callbacks: { label: context => `營收：${yen(context.raw)}` }
-        }
-      },
-      scales: {
-        y: {
-          beginAtZero: true,
-          ticks: { callback: value => yen(value) }
-        }
-      }
-    }
-  });
-}
-
-function renderProductChart() {
-  const grouped = {};
-
-  state.analyzedRows.forEach(row => {
-    const key = row.product || "商品名不明";
-    grouped[key] = (grouped[key] || 0) + row.revenue;
-  });
-
-  const top = Object.entries(grouped)
-    .sort((a, b) => b[1] - a[1])
-    .slice(0, 10);
-
-  state.productChart?.destroy();
-
-  state.productChart = new Chart(document.getElementById("productChart"), {
-    type: "bar",
-    data: {
-      labels: top.map(item => item[0]),
-      datasets: [{
-        data: top.map(item => item[1]),
-        backgroundColor: "#2f6fed",
-        borderRadius: 7
-      }]
-    },
-    options: {
-      indexAxis: "y",
-      responsive: true,
-      maintainAspectRatio: false,
-      plugins: {
-        legend: { display: false },
-        tooltip: {
-          callbacks: { label: context => `營收：${yen(context.raw)}` }
-        }
-      },
-      scales: {
-        x: {
-          beginAtZero: true,
-          ticks: { callback: value => yen(value) }
-        }
-      }
-    }
-  });
-}
-
-function renderTable() {
-  const keyword = tableSearch.value.trim().toLowerCase();
-  const rows = state.analyzedRows
-    .filter(row => {
-      if (!keyword) return true;
-      return [
-        row.date, row.orderId, row.product, row.sku, row.platform, row.store
-      ].some(value => String(value).toLowerCase().includes(keyword));
-    })
-    .slice(0, 300);
-
-  const tbody = document.getElementById("tableBody");
-  tbody.innerHTML = rows.map(row => `
-    <tr>
-      <td>${escapeHtml(row.date)}</td>
-      <td>${escapeHtml(row.orderId)}</td>
-      <td>${escapeHtml(row.product)}</td>
-      <td>${escapeHtml(row.sku)}</td>
-      <td>${number(row.quantity)}</td>
-      <td>${yen(row.revenue)}</td>
-      <td>${escapeHtml(row.platform)}</td>
-      <td>${escapeHtml(row.store)}</td>
-    </tr>
-  `).join("");
-}
-
-function normalize(value) {
-  return String(value ?? "")
-    .trim()
-    .toLowerCase()
-    .replace(/[\s_\-／/（）()]/g, "");
-}
-
-function cleanText(value) {
-  return String(value ?? "").trim();
-}
-
-function toNumber(value) {
-  if (typeof value === "number") return value;
-  const cleaned = String(value ?? "")
-    .replace(/[¥￥円,\s]/g, "")
-    .replace(/[^\d.-]/g, "");
-  const parsed = Number(cleaned);
-  return Number.isFinite(parsed) ? parsed : 0;
-}
-
-function normalizeDate(value) {
-  const text = cleanText(value);
-  if (!text) return "";
-
-  const compact = text.replace(/\./g, "/").replace(/-/g, "/");
-  const match = compact.match(/^(\d{4})\/(\d{1,2})\/(\d{1,2})/);
-
-  if (match) {
-    const [, year, month, day] = match;
-    return `${year}-${month.padStart(2, "0")}-${day.padStart(2, "0")}`;
-  }
-
-  return text;
-}
-
-function yen(value) {
-  return new Intl.NumberFormat("ja-JP", {
-    style: "currency",
-    currency: "JPY",
-    maximumFractionDigits: 0
-  }).format(Number(value) || 0);
-}
-
-function number(value) {
-  return new Intl.NumberFormat("zh-TW", {
-    maximumFractionDigits: 2
-  }).format(Number(value) || 0);
-}
-
-function sum(values) {
-  return values.reduce((total, value) => total + (Number(value) || 0), 0);
-}
-
-function setText(id, text) {
-  document.getElementById(id).textContent = text;
-}
-
-function setMessage(text, type = "") {
-  message.textContent = text;
-  message.className = type;
-}
-
-function escapeHtml(value) {
-  return String(value ?? "")
-    .replaceAll("&", "&amp;")
-    .replaceAll("<", "&lt;")
-    .replaceAll(">", "&gt;")
-    .replaceAll('"', "&quot;")
-    .replaceAll("'", "&#039;");
-}
+function chart(id,type,labels,data,label,horizontal=false){destroy(id);state.charts[id]=new Chart(document.getElementById(id),{type,data:{labels,datasets:[{label,data,borderWidth:3,tension:.25,fill:type==="line",backgroundColor:type==="line"?"rgba(47,111,237,.1)":"#2f6fed",borderColor:"#2f6fed",borderRadius:6}]},options:{responsive:true,maintainAspectRatio:false,indexAxis:horizontal?"y":"x",plugins:{legend:{display:type==="line"}}}})}
+function destroy(id){state.charts[id]?.destroy()}
+function group(rows,key,val){const d={};rows.forEach(r=>{const k=key(r)||"未設定";d[k]=(d[k]||0)+(Number(val(r))||0)});return d}
+function topGroup(rows,key,val,n){return Object.entries(group(rows,key,val)).sort((a,b)=>b[1]-a[1]).slice(0,n)}
+function text(v){return String(v??"").trim()}function num(v){const x=Number(String(v??"").replace(/[¥￥円,\s]/g,"").replace(/[^\d.-]/g,""));return Number.isFinite(x)?x:0}
+function dateVal(v){const t=text(v).replace(/\./g,"/").replace(/-/g,"/"),m=t.match(/^(\d{4})\/(\d{1,2})\/(\d{1,2})/);return m?`${m[1]}-${m[2].padStart(2,"0")}-${m[3].padStart(2,"0")}`:t}
+function norm(v){return text(v).toLowerCase().replace(/[\s_\-／/（）()]/g,"")}function sum(a){return a.reduce((x,y)=>x+(Number(y)||0),0)}function yen(v){return new Intl.NumberFormat("ja-JP",{style:"currency",currency:"JPY",maximumFractionDigits:0}).format(Number(v)||0)}function fmt(v){return new Intl.NumberFormat("zh-TW",{maximumFractionDigits:2}).format(Number(v)||0)}function set(id,v){document.getElementById(id).textContent=v}
+function esc(v){return text(v).replaceAll("&","&amp;").replaceAll("<","&lt;").replaceAll(">","&gt;").replaceAll('"',"&quot;").replaceAll("'","&#039;")}function escAttr(v){return esc(v)}
+updateAll();refreshTemplateSelect();
