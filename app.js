@@ -38,10 +38,28 @@ async function importProducts(file){
  $('productStatus').textContent='讀取中…';
  Papa.parse(file,{header:true,skipEmptyLines:'greedy',complete:async r=>{
   try{
-   const rows=r.data.map(x=>({id:pick(x,['商品番号']),productNumber:pick(x,['商品番号']),managementNumber:pick(x,['商品管理番号']),name:pick(x,['商品名']),projectName:pick(x,['專案名稱']),vendorName:pick(x,['廠商名']),supplyPrice:num(pick(x,['商品供應價'])),rakutenPriceJpy:num(pick(x,['樂天日幣售價'])),netseaPriceJpy:num(pick(x,['NETSEA日幣售價'])),shopifyPrice:num(pick(x,['Shopify售價'])),barcode:pick(x,['商品條碼'])})).filter(x=>x.id);
-   if(!rows.length)throw new Error('CSV 中找不到有效的「商品番号」，未執行任何變更。');
-   const duplicateIds=rows.map(x=>x.id).filter((id,i,a)=>a.indexOf(id)!==i);
-   if(duplicateIds.length)throw new Error('CSV 內有重複的商品番号：'+[...new Set(duplicateIds)].slice(0,10).join('、'));
+   const parsedRows=r.data.map((x,rowIndex)=>({
+    id:pick(x,['商品番号']),
+    productNumber:pick(x,['商品番号']),
+    managementNumber:pick(x,['商品管理番号']),
+    name:pick(x,['商品名']),
+    projectName:pick(x,['專案名稱']),
+    vendorName:pick(x,['廠商名']),
+    supplyPrice:num(pick(x,['商品供應價'])),
+    rakutenPriceJpy:num(pick(x,['樂天日幣售價'])),
+    netseaPriceJpy:num(pick(x,['NETSEA日幣售價'])),
+    shopifyPrice:num(pick(x,['Shopify售價'])),
+    barcode:pick(x,['商品條碼']),
+    sourceRow:rowIndex+2
+   })).filter(x=>x.id);
+   if(!parsedRows.length)throw new Error('CSV 中找不到有效的「商品番号」，未執行任何變更。');
+
+   // 商品番号才是 Firestore Document ID。商品管理番号只作為一般輔助欄位保存。
+   // 同一份 CSV 若有重複商品番号，採用最後一列，避免誤把商品管理番号當成主鍵。
+   const productMap=new Map();
+   parsedRows.forEach(item=>productMap.set(String(item.productNumber),item));
+   const rows=[...productMap.values()].map(({sourceRow,...item})=>item);
+   const duplicateCount=parsedRows.length-rows.length;
    let deleted=0;
    if(mode==='replace'){
     const currentCount=state.products.size;
@@ -57,7 +75,7 @@ async function importProducts(file){
    $('productStatus').textContent=mode==='replace'?'正在匯入新商品主檔…':'正在更新／新增商品…';
    await batchWrite('products',rows,x=>x.id);
    await logImport(mode==='replace'?'productMasterReplace':'productMasterMerge','',file.name,rows.length,rows.length,0);
-   $('productStatus').textContent=mode==='replace'?`完成：刪除 ${deleted} 筆，匯入 ${rows.length} 筆`:`完成：更新／新增 ${rows.length} 筆`;
+   $('productStatus').textContent=mode==='replace'?`完成：刪除 ${deleted} 筆，匯入 ${rows.length} 筆${duplicateCount?`（另有 ${duplicateCount} 列重複商品番号，已採用最後一列）`:''}`:`完成：更新／新增 ${rows.length} 筆${duplicateCount?`（另有 ${duplicateCount} 列重複商品番号，已採用最後一列）`:''}`;
    $('productFile').value='';
    await loadProductMaster();
    renderGroups();
