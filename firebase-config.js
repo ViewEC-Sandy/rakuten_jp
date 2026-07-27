@@ -1,6 +1,4 @@
-// 請將此檔案重新命名為 firebase-config.js，並填入 Firebase 專案設定。
-// Firebase Console → Project settings → Your apps → Web app
-
+// 請將 Firebase Console > 專案設定 > 您的應用程式 > SDK 設定內容貼到這裡。
 export const firebaseConfig = {
   apiKey: "AIzaSyCji9JRzfnR_E488uw_Kl_i3XryN6aZ5OQ",
   authDomain: "japan-ec-dashboard.firebaseapp.com",
