@@ -3,7 +3,7 @@ import {initializeApp} from 'https://www.gstatic.com/firebasejs/10.12.4/firebase
 import {getAuth,onAuthStateChanged,signInWithEmailAndPassword,sendPasswordResetEmail,signOut} from 'https://www.gstatic.com/firebasejs/10.12.4/firebase-auth.js';
 import {getFirestore,doc,getDoc,setDoc,collection,getDocs,query,where,writeBatch,serverTimestamp,Timestamp,orderBy,limit} from 'https://www.gstatic.com/firebasejs/10.12.4/firebase-firestore.js';
 const app=initializeApp(firebaseConfig),auth=getAuth(app),db=getFirestore(app),$=id=>document.getElementById(id);
-const state={user:null,role:'viewer',sales:[],compare:[],products:new Map(),productByNumber:new Map(),platforms:new Set(),charts:{}};
+const state={user:null,role:'viewer',sales:[],compare:[],products:new Map(),platforms:new Set(),charts:{}};
 const titles={overview:'營運總覽',platforms:'平台比較',products:'商品跨平台',groups:'專案分析',master:'商品主檔',import:'資料匯入',history:'匯入紀錄'};
 document.querySelectorAll('[data-page]').forEach(b=>b.onclick=()=>show(b.dataset.page));
 function show(id){document.querySelectorAll('[data-page]').forEach(b=>b.classList.toggle('active',b.dataset.page===id));document.querySelectorAll('.page').forEach(s=>s.classList.toggle('active',s.id===id));$('title').textContent=titles[id]||'';if(id==='history')loadHistory()}
@@ -15,8 +15,8 @@ async function ensureUser(){const r=doc(db,'users',state.user.uid),s=await getDo
 async function loadRole(){const s=await getDoc(doc(db,'users',state.user.uid));state.role=s.exists()?(s.data().role||'viewer'):'viewer'}
 function applyRole(){const edit=['admin','manager'].includes(state.role);document.querySelectorAll('.editor').forEach(x=>x.classList.toggle('hidden',!edit));$('viewerNotice').classList.toggle('hidden',edit)}
 function setDates(){const n=new Date(),s=new Date(n.getFullYear(),n.getMonth(),1);$('start').value=fd(s);$('end').value=fd(n)}function fd(d){return d.toISOString().slice(0,10)}
-async function loadProductMaster(){const s=await getDocs(collection(db,'products'));const rows=s.docs.map(d=>({id:d.id,...d.data()}));state.products=new Map(rows.map(x=>[x.id,x]));state.productByNumber=new Map(rows.filter(x=>x.productNumber).map(x=>[String(x.productNumber),x]));renderMaster()}
-function findProduct(productId){return state.products.get(String(productId))||state.productByNumber.get(String(productId))||null}
+async function loadProductMaster(){const s=await getDocs(collection(db,'products'));const rows=s.docs.map(d=>({id:d.id,...d.data()}));state.products=new Map(rows.map(x=>[String(x.id),x]));renderMaster()}
+function findProduct(productNumber){return state.products.get(String(productNumber))||null}
 async function loadPlatforms(){const s=await getDocs(collection(db,'platforms'));state.platforms=new Set(s.docs.map(d=>d.id));$('platform').innerHTML='<option value="">全部平台</option>'+[...state.platforms].sort().map(p=>`<option>${esc(p)}</option>`).join('')}
 async function loadReports(){const s=$('start').value,e=$('end').value;if(!s||!e)return;state.sales=await fetchSales(s,e,$('platform').value);if($('compare').value==='none')state.compare=[];else{const [cs,ce]=compareRange(s,e,$('compare').value);state.compare=await fetchSales(cs,ce,$('platform').value)}renderAll()}
 async function fetchSales(s,e,p){const qy=query(collection(db,'sales'),where('saleDate','>=',Timestamp.fromDate(new Date(s+'T00:00:00'))),where('saleDate','<=',Timestamp.fromDate(new Date(e+'T23:59:59'))));const snap=await getDocs(qy);return snap.docs.map(d=>({id:d.id,...d.data()})).filter(x=>!p||x.platform===p)}
@@ -31,9 +31,53 @@ function renderShare(){const g=Object.entries(by(state.sales,r=>r.platform,r=>r.
 function renderPlatforms(){const ks=[...new Set([...state.sales.map(x=>x.platform),...state.compare.map(x=>x.platform)])].filter(Boolean).sort();$('platformRows').innerHTML=ks.map(k=>{const a=summary(state.sales.filter(x=>x.platform===k)),b=summary(state.compare.filter(x=>x.platform===k)),g=growth(a.revenue,b.revenue);return`<tr><td>${esc(k)}</td><td>${yen(a.revenue)}</td><td>${yen(b.revenue)}</td><td>${yen(a.revenue-b.revenue)}</td><td class="${g.cls}">${g.text}</td><td>${fmt(a.quantity)}</td><td>${fmt(a.orders)}</td></tr>`}).join('')}
 function renderProducts(){const q=$('productSearch').value.toLowerCase(),m=new Map();state.sales.forEach(r=>{const k=r.productId+'||'+r.platform;if(!m.has(k))m.set(k,{...r,revenue:0,quantity:0,cmp:0});const x=m.get(k);x.revenue+=num(r.revenue);x.quantity+=num(r.quantity)});state.compare.forEach(r=>{const k=r.productId+'||'+r.platform;if(!m.has(k))m.set(k,{...r,revenue:0,quantity:0,cmp:0});m.get(k).cmp+=num(r.revenue)});$('productRows').innerHTML=[...m.values()].filter(x=>!q||(x.productId+' '+x.productName).toLowerCase().includes(q)).sort((a,b)=>b.revenue-a.revenue).slice(0,500).map(x=>{const g=growth(x.revenue,x.cmp);return`<tr><td>${esc(x.productId)}</td><td>${esc(x.productName)}</td><td>${esc(x.platform)}</td><td>${yen(x.revenue)}</td><td>${yen(x.cmp)}</td><td class="${g.cls}">${g.text}</td><td>${fmt(x.quantity)}</td></tr>`}).join('')}
 function renderGroups(){const total=sum(state.sales.map(x=>x.revenue)),m=new Map();state.sales.forEach(r=>{const k=findProduct(r.productId)?.projectName||'未設定專案';if(!m.has(k))m.set(k,{rev:0,cmp:0,qty:0});const x=m.get(k);x.rev+=num(r.revenue);x.qty+=num(r.quantity)});state.compare.forEach(r=>{const k=findProduct(r.productId)?.projectName||'未設定專案';if(!m.has(k))m.set(k,{rev:0,cmp:0,qty:0});m.get(k).cmp+=num(r.revenue)});$('groupRows').innerHTML=[...m.entries()].sort((a,b)=>b[1].rev-a[1].rev).map(([k,x])=>{const g=growth(x.rev,x.cmp);return`<tr><td>${esc(k)}</td><td>${yen(x.rev)}</td><td>${yen(x.cmp)}</td><td>${yen(x.rev-x.cmp)}</td><td class="${g.cls}">${g.text}</td><td>${fmt(x.qty)}</td><td>${total?(x.rev/total*100).toFixed(1):0}%</td></tr>`}).join('')}
-function renderMaster(){const q=$('masterSearch').value.trim().toLowerCase();$('masterRows').innerHTML=[...state.products.values()].filter(p=>!q||(p.id+' '+(p.productNumber||'')+' '+(p.name||'')+' '+(p.projectName||'')+' '+(p.vendorName||'')+' '+(p.barcode||'')).toLowerCase().includes(q)).sort((a,b)=>String(a.id).localeCompare(String(b.id),'ja')).map(p=>`<tr><td>${esc(p.id)}</td><td>${esc(p.productNumber)}</td><td>${esc(p.name)}</td><td>${esc(p.projectName)}</td><td>${esc(p.vendorName)}</td><td>${yen(p.supplyPrice)}</td><td>${yen(p.rakutenPriceJpy)}</td><td>${yen(p.netseaPriceJpy)}</td><td>${yen(p.shopifyPrice)}</td><td>${esc(p.barcode)}</td></tr>`).join('')}
+function renderMaster(){const q=$('masterSearch').value.trim().toLowerCase();$('masterRows').innerHTML=[...state.products.values()].filter(p=>!q||((p.id||'')+' '+(p.managementNumber||'')+' '+(p.name||'')+' '+(p.projectName||'')+' '+(p.vendorName||'')+' '+(p.barcode||'')).toLowerCase().includes(q)).sort((a,b)=>String(a.id).localeCompare(String(b.id),'ja')).map(p=>`<tr><td>${esc(p.id)}</td><td>${esc(p.managementNumber)}</td><td>${esc(p.name)}</td><td>${esc(p.projectName)}</td><td>${esc(p.vendorName)}</td><td>${yen(p.supplyPrice)}</td><td>${yen(p.rakutenPriceJpy)}</td><td>${yen(p.netseaPriceJpy)}</td><td>${yen(p.shopifyPrice)}</td><td>${esc(p.barcode)}</td></tr>`).join('')}
 $('productFile').onchange=e=>e.target.files?.[0]&&importProducts(e.target.files[0]);
-async function importProducts(file){$('productStatus').textContent='讀取中…';Papa.parse(file,{header:true,skipEmptyLines:'greedy',complete:async r=>{try{const rows=r.data.map(x=>({id:pick(x,['商品管理番号']),productNumber:pick(x,['商品番号']),name:pick(x,['商品名']),projectName:pick(x,['專案名稱']),vendorName:pick(x,['廠商名']),supplyPrice:num(pick(x,['商品供應價'])),rakutenPriceJpy:num(pick(x,['樂天日幣售價'])),netseaPriceJpy:num(pick(x,['NETSEA日幣售價'])),shopifyPrice:num(pick(x,['Shopify售價'])),barcode:pick(x,['商品條碼'])})).filter(x=>x.id);await batchWrite('products',rows,x=>x.id);await logImport('productMaster','',file.name,rows.length,rows.length,0);$('productStatus').textContent='完成：'+rows.length+' 筆';await loadProductMaster();renderGroups()}catch(e){$('productStatus').textContent=e.message}}})}
+async function importProducts(file){
+ const mode=$('productImportMode')?.value||'merge';
+ $('productStatus').textContent='讀取中…';
+ Papa.parse(file,{header:true,skipEmptyLines:'greedy',complete:async r=>{
+  try{
+   const rows=r.data.map(x=>({id:pick(x,['商品番号']),productNumber:pick(x,['商品番号']),managementNumber:pick(x,['商品管理番号']),name:pick(x,['商品名']),projectName:pick(x,['專案名稱']),vendorName:pick(x,['廠商名']),supplyPrice:num(pick(x,['商品供應價'])),rakutenPriceJpy:num(pick(x,['樂天日幣售價'])),netseaPriceJpy:num(pick(x,['NETSEA日幣售價'])),shopifyPrice:num(pick(x,['Shopify售價'])),barcode:pick(x,['商品條碼'])})).filter(x=>x.id);
+   if(!rows.length)throw new Error('CSV 中找不到有效的「商品番号」，未執行任何變更。');
+   const duplicateIds=rows.map(x=>x.id).filter((id,i,a)=>a.indexOf(id)!==i);
+   if(duplicateIds.length)throw new Error('CSV 內有重複的商品番号：'+[...new Set(duplicateIds)].slice(0,10).join('、'));
+   let deleted=0;
+   if(mode==='replace'){
+    const currentCount=state.products.size;
+    const answer=prompt(`此操作將刪除目前 ${currentCount} 筆商品資料，再匯入 ${rows.length} 筆。\n\n銷售資料不會被刪除，商品番号是唯一主鍵；若更換商品番号，舊銷售資料將無法對應。\n\n請輸入 DELETE 確認：`);
+    if(answer!=='DELETE'){
+     $('productStatus').textContent='已取消：商品主檔未變更。';
+     $('productFile').value='';
+     return;
+    }
+    $('productStatus').textContent='正在清除舊商品資料…';
+    deleted=await deleteCollectionDocuments('products');
+   }
+   $('productStatus').textContent=mode==='replace'?'正在匯入新商品主檔…':'正在更新／新增商品…';
+   await batchWrite('products',rows,x=>x.id);
+   await logImport(mode==='replace'?'productMasterReplace':'productMasterMerge','',file.name,rows.length,rows.length,0);
+   $('productStatus').textContent=mode==='replace'?`完成：刪除 ${deleted} 筆，匯入 ${rows.length} 筆`:`完成：更新／新增 ${rows.length} 筆`;
+   $('productFile').value='';
+   await loadProductMaster();
+   renderGroups();
+  }catch(e){
+   console.error(e);
+   $('productStatus').textContent='匯入失敗：'+e.message;
+   $('productFile').value='';
+  }
+ }})
+}
+async function deleteCollectionDocuments(collectionName){
+ const snap=await getDocs(collection(db,collectionName));
+ const docs=snap.docs;
+ for(let i=0;i<docs.length;i+=450){
+  const batch=writeBatch(db);
+  docs.slice(i,i+450).forEach(d=>batch.delete(d.ref));
+  await batch.commit();
+ }
+ return docs.length;
+}
 $('salesFile').onchange=e=>e.target.files?.[0]&&importSales(e.target.files[0]);
 async function importSales(file){const p=$('importPlatform').value.trim();if(!p)return $('salesStatus').textContent='請先輸入平台名稱';$('salesStatus').textContent='讀取中…';Papa.parse(file,{header:true,skipEmptyLines:'greedy',complete:async r=>{try{const rows=r.data.map((x,i)=>{const date=pick(x,['日期','日付','注文日']),orderId=pick(x,['訂單編號','注文番号']),productId=pick(x,['商品編號','商品番号','SKU','sku']),productName=pick(x,['商品名稱','商品名']),line=pick(x,['明細序號','明細番号'])||String(i+1);if(!date||!orderId||!productId)return null;const d=parseDate(date);return{id:safe(p+'_'+orderId+'_'+productId+'_'+line),platform:p,orderId,productId,productName,quantity:num(pick(x,['數量','個数','数量'])),revenue:num(pick(x,['營收','売上金額','金額'])),saleDate:Timestamp.fromDate(d),year:d.getFullYear(),month:d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0'),sourceFile:file.name,updatedAt:serverTimestamp()}}).filter(Boolean);let write=rows,skipped=0;if($('duplicate').value==='skip'){const checks=await Promise.all(rows.map(x=>getDoc(doc(db,'sales',x.id))));write=rows.filter((_,i)=>!checks[i].exists());skipped=rows.length-write.length}await batchWrite('sales',write,x=>x.id);await setDoc(doc(db,'platforms',p),{name:p,updatedAt:serverTimestamp()},{merge:true});await logImport('sales',p,file.name,rows.length,write.length,skipped);$('salesStatus').textContent=`完成：讀取 ${rows.length}、寫入 ${write.length}、跳過 ${skipped}`;await loadPlatforms();await loadReports()}catch(e){$('salesStatus').textContent=e.message}}})}
 async function batchWrite(c,rows,id){for(let i=0;i<rows.length;i+=450){const b=writeBatch(db);rows.slice(i,i+450).forEach(x=>b.set(doc(db,c,id(x)),{...x,updatedAt:serverTimestamp()},{merge:true}));await b.commit()}}

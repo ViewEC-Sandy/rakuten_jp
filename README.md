@@ -1,31 +1,47 @@
-# Japan EC Dashboard V8 Core
+# Japan EC Dashboard V8.1 Core
 
-這是由既有 V7 專案修正而成的 V8 Core 版，重點更新商品主檔為 10 欄，並修正商品主檔表格顯示與跨平台商品對照。
+## V8.1 主要變更
 
-## 使用步驟
-
-1. 編輯 `firebase-config.js`，貼入自己的 Firebase Web App 設定。
-2. Firebase Authentication 啟用 Email/Password。
-3. 建立 Firestore Database，將 `firestore.rules` 內容發布到 Rules。
-4. 第一次登入後，系統會建立 `users/{UID}`，預設角色為 `viewer`。
-5. 到 Firestore 將該使用者的 `role` 手動改為 `manager` 或 `admin`，才可匯入資料。
-6. 將整個資料夾上傳到 GitHub Pages。
+- `商品番号` 為 Firestore `products` collection 的 Document ID，也是所有銷售資料的唯一關聯鍵。
+- `商品管理番号` 為輔助管理編號，可修改，不影響歷史銷售資料。
+- 商品主檔支援兩種匯入方式：
+  - 更新／新增商品：相同商品番号覆蓋更新，其他既有商品保留。
+  - 完全取代商品主檔：刪除 products collection 後匯入本次 CSV，需輸入 `DELETE` 確認。
+- 銷售 CSV 必須以 `商品番号` 對應商品主檔。
 
 ## 商品主檔欄位
 
-- 商品管理番号（Firestore 文件 ID）
-- 商品番号（銷售 CSV 的跨平台對照碼）
-- 商品名
-- 專案名稱
-- 廠商名
-- 商品供應價
-- 樂天日幣售價
-- NETSEA日幣售價
-- Shopify售價
-- 商品條碼
+1. 商品番号（唯一 ID，必填）
+2. 商品管理番号（輔助編號）
+3. 商品名
+4. 專案名稱
+5. 廠商名
+6. 商品供應價
+7. 樂天日幣售價
+8. NETSEA日幣售價
+9. Shopify售價
+10. 商品條碼
+
+## Firestore 結構
+
+```text
+products/{商品番号}
+sales/{平台_訂單編號_商品番号_明細序號}
+platforms/{平台名稱}
+imports/{自動產生 ID}
+users/{Firebase Auth UID}
+```
+
+## 安裝
+
+1. 將 `firebase-config.js` 內容改成你的 Firebase Web App 設定。
+2. 在 Firebase Authentication 啟用 Email/Password。
+3. 建立 Firestore Database。
+4. 將 `firestore.rules` 發布到 Firestore Rules。
+5. 把整個資料夾上傳到 GitHub Pages。
+6. 第一次登入後，到 Firestore 的 `users/{UID}` 將 `role` 改為 `admin` 或 `manager`，才能匯入資料。
 
 ## 注意
 
-- 銷售 CSV 的「商品編號」應填商品主檔的「商品番号」。
-- 初次使用 Firestore 複合查詢時，Firebase 可能提示建立索引，請依錯誤訊息中的連結建立。
-- 此版本為現有 V7 的完整修正版，不是先前規劃中的大型模組化重寫版。
+- 不要任意修改既有商品的 `商品番号`。更換商品番号等同建立新商品，舊銷售資料不會自動轉移。
+- 完全取代商品主檔不會刪除 sales collection。
