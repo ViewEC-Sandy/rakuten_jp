@@ -5,7 +5,7 @@ import {
   sendPasswordResetEmail, signOut
 } from "https://www.gstatic.com/firebasejs/10.12.4/firebase-auth.js";
 import {
-  getFirestore, doc, getDoc, setDoc, collection, getDocs
+  getFirestore, doc, getDoc, setDoc, collection, getDocs, serverTimestamp
 } from "https://www.gstatic.com/firebasejs/10.12.4/firebase-firestore.js";
 
 const app=initializeApp(firebaseConfig),auth=getAuth(app),db=getFirestore(app);
@@ -37,24 +37,36 @@ async function resetPassword(){const email=$("loginEmail").value.trim();if(!emai
 onAuthStateChanged(auth,async user=>{
 $("loadingScreen").classList.add("hidden");
 if(!user){state.user=null;$("authScreen").classList.remove("hidden");$("appShell").classList.add("hidden");return}
-state.user=user;await loadUserProfile();await loadWorkspaces();applyRole();$("currentUserText").textContent=user.email;$("currentRoleText").textContent=`角色：${state.role}`;$("authScreen").classList.add("hidden");$("appShell").classList.remove("hidden");loadWorkspaceState();initSortable();updateAll()
+state.user=user;
+try{
+await ensureUserProfile();
+await loadUserProfile();
+await loadWorkspaces();
+applyRole();
+$("currentUserText").textContent=user.email||"Firebase 使用者";
+$("currentRoleText").textContent=`角色：${state.role}`;
+$("authScreen").classList.add("hidden");
+$("appShell").classList.remove("hidden");
+loadWorkspaceState();initSortable();updateAll();
+}catch(e){console.error(e);$("authMessage").textContent=`登入後初始化失敗：${e.message}`;$("authScreen").classList.remove("hidden");$("appShell").classList.add("hidden")}
 });
 
+async function ensureUserProfile(){const ref=doc(db,"users",state.user.uid);const snap=await getDoc(ref);if(!snap.exists()){await setDoc(ref,{email:state.user.email||"",role:"viewer",createdAt:serverTimestamp(),lastLogin:serverTimestamp()})}else{await setDoc(ref,{email:state.user.email||snap.data().email||"",lastLogin:serverTimestamp()},{merge:true})}}
 async function loadUserProfile(){const snap=await getDoc(doc(db,"users",state.user.uid));state.role=snap.exists()?(snap.data().role||"viewer"):"viewer"}
 function applyRole(){
 document.querySelectorAll(".admin-only").forEach(el=>el.classList.toggle("hidden",state.role!=="admin"));
-document.querySelectorAll(".manager-only").forEach(el=>el.classList.toggle("hidden",!["admin","manager"].includes(state.role)))
+document.querySelectorAll(".manager-only").forEach(el=>el.classList.toggle("hidden",!["admin","manager"].includes(state.role)));const n=$("viewerNotice");if(n)n.classList.toggle("hidden",["admin","manager"].includes(state.role))
 }
 async function loadWorkspaces(){
 const snap=await getDocs(collection(db,"workspaces"));state.workspaces=snap.docs.map(d=>({id:d.id,...d.data()}));
 if(!state.workspaces.length){state.workspaces=[{id:"default",name:"Default Workspace"}]}
 $("workspaceSelect").innerHTML=state.workspaces.map(w=>`<option value="${esc(w.id)}">${esc(w.name||w.id)}</option>`).join("");
-state.workspaceId=localStorage.getItem("v5_workspace")||state.workspaces[0].id;$("workspaceSelect").value=state.workspaceId
+state.workspaceId=localStorage.getItem("v6_workspace")||state.workspaces[0].id;$("workspaceSelect").value=state.workspaceId
 }
-$("workspaceSelect").addEventListener("change",e=>{saveWorkspaceState();state.workspaceId=e.target.value;localStorage.setItem("v5_workspace",state.workspaceId);loadWorkspaceState();updateAll()});
-async function createWorkspace(){if(state.role!=="admin")return;const name=prompt("Workspace 名稱");if(!name)return;const id="ws_"+Date.now();await setDoc(doc(db,"workspaces",id),{name});await loadWorkspaces();$("workspaceSelect").value=id;state.workspaceId=id;localStorage.setItem("v5_workspace",id)}
+$("workspaceSelect").addEventListener("change",e=>{saveWorkspaceState();state.workspaceId=e.target.value;localStorage.setItem("v6_workspace",state.workspaceId);loadWorkspaceState();updateAll()});
+async function createWorkspace(){if(state.role!=="admin")return;const name=prompt("Workspace 名稱");if(!name)return;const id="ws_"+Date.now();await setDoc(doc(db,"workspaces",id),{name});await loadWorkspaces();$("workspaceSelect").value=id;state.workspaceId=id;localStorage.setItem("v6_workspace",id)}
 
-function workspaceKey(suffix){return `ec_v5_${state.workspaceId}_${suffix}`}
+function workspaceKey(suffix){return `ec_v6_${state.workspaceId}_${suffix}`}
 function saveWorkspaceState(){localStorage.setItem(workspaceKey("rows"),JSON.stringify(state.rows));localStorage.setItem(workspaceKey("files"),JSON.stringify(state.files));localStorage.setItem(workspaceKey("fields"),JSON.stringify(state.fieldConfig))}
 function loadWorkspaceState(){state.rows=JSON.parse(localStorage.getItem(workspaceKey("rows"))||"[]");state.files=JSON.parse(localStorage.getItem(workspaceKey("files"))||"[]");state.fieldConfig=JSON.parse(localStorage.getItem(workspaceKey("fields"))||JSON.stringify(defaultFields));restoreLayout()}
 
@@ -98,8 +110,8 @@ function renderTemplates(){$("templateList").innerHTML=Object.entries(getTemplat
 function initSortable(){state.sortable?.destroy();state.sortable=new Sortable($("dashboardGrid"),{animation:180,handle:".drag-handle"})}
 function saveLayout(){const order=[...$("dashboardGrid").children].map(x=>x.dataset.widget);localStorage.setItem(workspaceKey("layout"),JSON.stringify(order));alert("版面已儲存")}
 function restoreLayout(){const order=JSON.parse(localStorage.getItem(workspaceKey("layout"))||"[]"),grid=$("dashboardGrid");order.forEach(id=>{const el=grid.querySelector(`[data-widget="${id}"]`);if(el)grid.appendChild(el)})}
-function toggleTheme(){document.body.classList.toggle("dark");localStorage.setItem("ec_v5_dark",document.body.classList.contains("dark")?"1":"0")}
-if(localStorage.getItem("ec_v5_dark")==="1")document.body.classList.add("dark");
+function toggleTheme(){document.body.classList.toggle("dark");localStorage.setItem("ec_v6_dark",document.body.classList.contains("dark")?"1":"0")}
+if(localStorage.getItem("ec_v6_dark")==="1")document.body.classList.add("dark");
 
 ["trendDateField","trendMetricField","trendChartType","rankingDimension","rankingMetric","rankingChartType","filterDateField","filterDimensionField","filterDimensionValue","tableLimit","kpiLimit"].forEach(id=>$(id).addEventListener("change",updateAll));
 $("detailSearch").addEventListener("input",renderDetail);

@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Japan EC Dashboard V5</title>
+  <title>Japan EC Dashboard V6</title>
   <link rel="stylesheet" href="style.css">
   <script src="https://cdn.jsdelivr.net/npm/papaparse@5.4.1/papaparse.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.3/dist/chart.umd.min.js"></script>
@@ -38,7 +38,7 @@
         <span class="brand-mark">EC</span>
         <div>
           <strong>Japan EC Dashboard</strong>
-          <small>V5 Workspace BI</small>
+          <small>V6 Enterprise</small>
         </div>
       </div>
 
@@ -75,6 +75,8 @@
           <button id="goImportBtn" class="primary-btn manager-only">匯入 CSV</button>
         </div>
       </header>
+
+      <div id="viewerNotice" class="viewer-notice hidden">目前角色為 Viewer，只能查看資料。請由管理員將 Firestore 的 users/{UID}/role 改為 manager 或 admin。</div>
 
       <section id="dashboard" class="page-section active">
         <div class="filter-bar">
