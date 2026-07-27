@@ -1,137 +1,41 @@
-import { firebaseConfig } from "./firebase-config.js";
-import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.4/firebase-app.js";
-import {
-  getAuth, onAuthStateChanged, signInWithEmailAndPassword,
-  sendPasswordResetEmail, signOut
-} from "https://www.gstatic.com/firebasejs/10.12.4/firebase-auth.js";
-import {
-  getFirestore, doc, getDoc, setDoc, collection, getDocs, serverTimestamp
-} from "https://www.gstatic.com/firebasejs/10.12.4/firebase-firestore.js";
-
-const app=initializeApp(firebaseConfig),auth=getAuth(app),db=getFirestore(app);
-const state={user:null,role:"viewer",workspaceId:"default",workspaces:[],rows:[],files:[],rawRows:[],headers:[],fieldConfig:[],charts:{},sortable:null};
-const titles={dashboard:"儀表板",data:"資料管理",templates:"欄位模板",layout:"版面設定",users:"使用者"};
-const defaultFields=[
-{label:"日期",type:"date",source:"",required:true},
-{label:"訂單編號",type:"id",source:"",required:true},
-{label:"商品名稱",type:"dimension",source:"",required:true},
-{label:"數量",type:"number",source:"",required:true},
-{label:"營收",type:"number",source:"",required:true}
-];
-
-const $=id=>document.getElementById(id);
-$("loginBtn").addEventListener("click",login);
-$("resetPasswordBtn").addEventListener("click",resetPassword);
-$("logoutBtn").addEventListener("click",()=>signOut(auth));
-$("themeBtn").addEventListener("click",toggleTheme);
-$("goImportBtn").addEventListener("click",()=>showSection("data"));
-$("saveLayoutBtn").addEventListener("click",saveLayout);
-$("newWorkspaceBtn").addEventListener("click",createWorkspace);
-
-document.querySelectorAll(".nav-item").forEach(b=>b.addEventListener("click",()=>showSection(b.dataset.section)));
-function showSection(id){document.querySelectorAll(".nav-item").forEach(b=>b.classList.toggle("active",b.dataset.section===id));document.querySelectorAll(".page-section").forEach(s=>s.classList.toggle("active",s.id===id));$("pageTitle").textContent=titles[id]||"";if(id==="users"&&state.role==="admin")loadUsers()}
-
-async function login(){try{$("authMessage").textContent="登入中…";await signInWithEmailAndPassword(auth,$("loginEmail").value.trim(),$("loginPassword").value)}catch(e){$("authMessage").textContent=e.message}}
-async function resetPassword(){const email=$("loginEmail").value.trim();if(!email)return $("authMessage").textContent="請先輸入 Email";try{await sendPasswordResetEmail(auth,email);$("authMessage").textContent="重設密碼信件已寄出"}catch(e){$("authMessage").textContent=e.message}}
-
-onAuthStateChanged(auth,async user=>{
-$("loadingScreen").classList.add("hidden");
-if(!user){state.user=null;$("authScreen").classList.remove("hidden");$("appShell").classList.add("hidden");return}
-state.user=user;
-try{
-await ensureUserProfile();
-await loadUserProfile();
-await loadWorkspaces();
-applyRole();
-$("currentUserText").textContent=user.email||"Firebase 使用者";
-$("currentRoleText").textContent=`角色：${state.role}`;
-$("authScreen").classList.add("hidden");
-$("appShell").classList.remove("hidden");
-loadWorkspaceState();initSortable();updateAll();
-}catch(e){console.error(e);$("authMessage").textContent=`登入後初始化失敗：${e.message}`;$("authScreen").classList.remove("hidden");$("appShell").classList.add("hidden")}
-});
-
-async function ensureUserProfile(){const ref=doc(db,"users",state.user.uid);const snap=await getDoc(ref);if(!snap.exists()){await setDoc(ref,{email:state.user.email||"",role:"viewer",createdAt:serverTimestamp(),lastLogin:serverTimestamp()})}else{await setDoc(ref,{email:state.user.email||snap.data().email||"",lastLogin:serverTimestamp()},{merge:true})}}
-async function loadUserProfile(){const snap=await getDoc(doc(db,"users",state.user.uid));state.role=snap.exists()?(snap.data().role||"viewer"):"viewer"}
-function applyRole(){
-document.querySelectorAll(".admin-only").forEach(el=>el.classList.toggle("hidden",state.role!=="admin"));
-document.querySelectorAll(".manager-only").forEach(el=>el.classList.toggle("hidden",!["admin","manager"].includes(state.role)));const n=$("viewerNotice");if(n)n.classList.toggle("hidden",["admin","manager"].includes(state.role))
-}
-async function loadWorkspaces(){
-const snap=await getDocs(collection(db,"workspaces"));state.workspaces=snap.docs.map(d=>({id:d.id,...d.data()}));
-if(!state.workspaces.length){state.workspaces=[{id:"default",name:"Default Workspace"}]}
-$("workspaceSelect").innerHTML=state.workspaces.map(w=>`<option value="${esc(w.id)}">${esc(w.name||w.id)}</option>`).join("");
-state.workspaceId=localStorage.getItem("v6_workspace")||state.workspaces[0].id;$("workspaceSelect").value=state.workspaceId
-}
-$("workspaceSelect").addEventListener("change",e=>{saveWorkspaceState();state.workspaceId=e.target.value;localStorage.setItem("v6_workspace",state.workspaceId);loadWorkspaceState();updateAll()});
-async function createWorkspace(){if(state.role!=="admin")return;const name=prompt("Workspace 名稱");if(!name)return;const id="ws_"+Date.now();await setDoc(doc(db,"workspaces",id),{name});await loadWorkspaces();$("workspaceSelect").value=id;state.workspaceId=id;localStorage.setItem("v6_workspace",id)}
-
-function workspaceKey(suffix){return `ec_v6_${state.workspaceId}_${suffix}`}
-function saveWorkspaceState(){localStorage.setItem(workspaceKey("rows"),JSON.stringify(state.rows));localStorage.setItem(workspaceKey("files"),JSON.stringify(state.files));localStorage.setItem(workspaceKey("fields"),JSON.stringify(state.fieldConfig))}
-function loadWorkspaceState(){state.rows=JSON.parse(localStorage.getItem(workspaceKey("rows"))||"[]");state.files=JSON.parse(localStorage.getItem(workspaceKey("files"))||"[]");state.fieldConfig=JSON.parse(localStorage.getItem(workspaceKey("fields"))||JSON.stringify(defaultFields));restoreLayout()}
-
-const csvFile=$("csvFile"),dropZone=$("dropZone");
-csvFile.addEventListener("change",e=>e.target.files?.[0]&&loadCsv(e.target.files[0]));
-["dragenter","dragover"].forEach(n=>dropZone.addEventListener(n,e=>{e.preventDefault();dropZone.classList.add("dragover")}));
-["dragleave","drop"].forEach(n=>dropZone.addEventListener(n,e=>{e.preventDefault();dropZone.classList.remove("dragover")}));
-dropZone.addEventListener("drop",e=>e.dataTransfer.files?.[0]&&loadCsv(e.dataTransfer.files[0]));
-
-function loadCsv(file){
-$("importStatus").textContent=`正在讀取：${file.name}`;
-Papa.parse(file,{header:true,skipEmptyLines:"greedy",complete:r=>{
-state.rawRows=r.data;state.headers=(r.meta.fields||[]).map(x=>String(x).trim());state.currentFileName=file.name;
-state.fieldConfig=JSON.parse(JSON.stringify(defaultFields));renderFieldRows();$("mappingPanel").classList.remove("hidden");$("importStatus").textContent=`${file.name}：${state.rawRows.length} 筆資料`;refreshTemplateSelect()
-},error:e=>$("importStatus").textContent=e.message})
-}
-$("addFieldBtn").addEventListener("click",()=>{state.fieldConfig.push({label:"新欄位",type:"dimension",source:"",required:false});renderFieldRows()});
-function renderFieldRows(){
-$("fieldRows").innerHTML="";
-state.fieldConfig.forEach((f,i)=>{
-const node=$("fieldRowTemplate").content.cloneNode(true),row=node.querySelector(".field-row"),label=row.querySelector(".field-label"),type=row.querySelector(".field-type"),source=row.querySelector(".field-source"),required=row.querySelector(".field-required");
-label.value=f.label;type.value=f.type;required.checked=f.required;source.innerHTML='<option value="">不使用</option>'+state.headers.map(h=>`<option value="${esc(h)}">${esc(h)}</option>`).join("");source.value=f.source||"";
-label.oninput=e=>state.fieldConfig[i].label=e.target.value.trim();type.onchange=e=>state.fieldConfig[i].type=e.target.value;source.onchange=e=>state.fieldConfig[i].source=e.target.value;required.onchange=e=>state.fieldConfig[i].required=e.target.checked;row.querySelector(".remove-field").onclick=()=>{state.fieldConfig.splice(i,1);renderFieldRows()};$("fieldRows").appendChild(node)
-})
-}
-$("appendDataBtn").addEventListener("click",()=>importRows(false));
-$("replaceDataBtn").addEventListener("click",()=>importRows(true));
-function importRows(replace){
-const missing=state.fieldConfig.filter(f=>f.required&&!f.source);if(missing.length)return $("importStatus").textContent=`請指定：${missing.map(x=>x.label).join("、")}`;
-const usable=state.fieldConfig.filter(f=>f.source&&f.label),rows=state.rawRows.map(r=>{const o={};usable.forEach(f=>o[f.label]=f.type==="number"?num(r[f.source]):f.type==="date"?dateVal(r[f.source]):text(r[f.source]));return o}).filter(r=>Object.values(r).some(v=>v!==""&&v!==0));
-if(replace){state.rows=[];state.files=[]}state.rows.push(...rows);state.files.push({name:state.currentFileName,count:rows.length});saveWorkspaceState();updateAll();showSection("dashboard")
-}
-$("clearDataBtn").addEventListener("click",()=>{state.rows=[];state.files=[];saveWorkspaceState();updateAll()});
-
-$("saveTemplateBtn").addEventListener("click",()=>{const name=$("templateName").value.trim();if(!name)return;const t=getTemplates();t[name]=state.fieldConfig;localStorage.setItem(workspaceKey("templates"),JSON.stringify(t));$("templateName").value="";renderTemplates();refreshTemplateSelect()});
-$("templateSelect").addEventListener("change",e=>{const t=getTemplates()[e.target.value];if(t){state.fieldConfig=JSON.parse(JSON.stringify(t));renderFieldRows()}});
-function getTemplates(){return JSON.parse(localStorage.getItem(workspaceKey("templates"))||"{}")}
-function refreshTemplateSelect(){$("templateSelect").innerHTML='<option value="">選擇欄位模板</option>'+Object.keys(getTemplates()).map(n=>`<option value="${esc(n)}">${esc(n)}</option>`).join("")}
-function renderTemplates(){$("templateList").innerHTML=Object.entries(getTemplates()).map(([n,c])=>`<div class="template-item"><div><strong>${esc(n)}</strong><small>${c.length} 個欄位</small></div><button class="danger-btn small" data-delete-template="${esc(n)}">刪除</button></div>`).join("")||"<p>尚未建立模板。</p>";document.querySelectorAll("[data-delete-template]").forEach(b=>b.onclick=()=>{const t=getTemplates();delete t[b.dataset.deleteTemplate];localStorage.setItem(workspaceKey("templates"),JSON.stringify(t));renderTemplates();refreshTemplateSelect()})}
-
-function initSortable(){state.sortable?.destroy();state.sortable=new Sortable($("dashboardGrid"),{animation:180,handle:".drag-handle"})}
-function saveLayout(){const order=[...$("dashboardGrid").children].map(x=>x.dataset.widget);localStorage.setItem(workspaceKey("layout"),JSON.stringify(order));alert("版面已儲存")}
-function restoreLayout(){const order=JSON.parse(localStorage.getItem(workspaceKey("layout"))||"[]"),grid=$("dashboardGrid");order.forEach(id=>{const el=grid.querySelector(`[data-widget="${id}"]`);if(el)grid.appendChild(el)})}
-function toggleTheme(){document.body.classList.toggle("dark");localStorage.setItem("ec_v6_dark",document.body.classList.contains("dark")?"1":"0")}
-if(localStorage.getItem("ec_v6_dark")==="1")document.body.classList.add("dark");
-
-["trendDateField","trendMetricField","trendChartType","rankingDimension","rankingMetric","rankingChartType","filterDateField","filterDimensionField","filterDimensionValue","tableLimit","kpiLimit"].forEach(id=>$(id).addEventListener("change",updateAll));
-$("detailSearch").addEventListener("input",renderDetail);
-$("clearFilterBtn").addEventListener("click",()=>{$("filterDimensionValue").value="";updateAll()});
-
-function filteredRows(){const dim=$("filterDimensionField").value,val=$("filterDimensionValue").value;return state.rows.filter(r=>!dim||!val||String(r[dim])===val)}
-function updateAll(){renderSelectors();renderFilterValues();renderKpis();renderTrend();renderRanking();renderDetail();renderFiles();renderTemplates();refreshTemplateSelect()}
-function fields(types){const set=new Set(types),all=new Set();state.rows.forEach(r=>Object.keys(r).forEach(k=>all.add(k)));return [...all].filter(k=>state.fieldConfig.some(f=>f.label===k&&set.has(f.type)))}
-function fill(id,vals,blank=false){const el=$(id),cur=el.value;el.innerHTML=(blank?'<option value="">全部</option>':'')+vals.map(v=>`<option value="${esc(v)}">${esc(v)}</option>`).join("");if(vals.includes(cur)||blank&&cur==="")el.value=cur}
-function renderSelectors(){const dims=fields(["dimension","id","date"]),dates=fields(["date"]),nums=fields(["number"]);fill("trendDateField",dates);fill("trendMetricField",nums);fill("rankingDimension",dims);fill("rankingMetric",nums);fill("filterDateField",dates,true);fill("filterDimensionField",dims,true)}
-function renderFilterValues(){const dim=$("filterDimensionField").value,vals=dim?[...new Set(state.rows.map(r=>r[dim]).filter(v=>v!==""&&v!=null))]:[];fill("filterDimensionValue",vals,true)}
-function renderKpis(){const nums=fields(["number"]),limit=Number($("kpiLimit").value||8);$("kpiGrid").innerHTML=nums.slice(0,limit).map(n=>`<article class="kpi-card"><span>${esc(n)}</span><strong>${fmt(sum(filteredRows().map(r=>r[n])))}</strong></article>`).join("")||'<article class="kpi-card"><span>尚無數值欄位</span><strong>—</strong></article>'}
-function renderTrend(){const d=$("trendDateField").value,m=$("trendMetricField").value;if(!d||!m)return draw("trendChart","line",[],[],"");const g=group(filteredRows(),r=>r[d],r=>r[m]),labels=Object.keys(g).sort();draw("trendChart",$("trendChartType").value,labels,labels.map(k=>g[k]),m)}
-function renderRanking(){const d=$("rankingDimension").value,m=$("rankingMetric").value;if(!d||!m)return draw("rankingChart","bar",[],[],"");const g=Object.entries(group(filteredRows(),r=>r[d]||"未設定",r=>r[m])).sort((a,b)=>b[1]-a[1]).slice(0,10);draw("rankingChart",$("rankingChartType").value,g.map(x=>x[0]),g.map(x=>x[1]),m)}
-function renderDetail(){const rows=filteredRows(),fs=[...new Set(rows.flatMap(r=>Object.keys(r)))],q=$("detailSearch").value.toLowerCase(),limit=Number($("tableLimit").value||500);$("detailHead").innerHTML=`<tr>${fs.map(f=>`<th>${esc(f)}</th>`).join("")}</tr>`;$("detailBody").innerHTML=rows.filter(r=>!q||Object.values(r).some(v=>String(v).toLowerCase().includes(q))).slice(0,limit).map(r=>`<tr>${fs.map(f=>`<td>${esc(r[f]??"")}</td>`).join("")}</tr>`).join("")}
-function renderFiles(){$("fileList").innerHTML=state.files.map(f=>`<div class="file-item"><div><strong>${esc(f.name)}</strong><small>${fmt(f.count)} 筆</small></div></div>`).join("")||"<p>尚未匯入任何 CSV。</p>"}
-async function loadUsers(){const snap=await getDocs(collection(db,"users"));$("userList").innerHTML=snap.docs.map(d=>{const x=d.data();return `<div class="template-item"><div><strong>${esc(x.email||d.id)}</strong><small>角色：${esc(x.role||"viewer")}</small></div></div>`}).join("")||"<p>尚無使用者資料。</p>"}
-
-function draw(id,type,labels,data,label){state.charts[id]?.destroy();state.charts[id]=new Chart($(id),{type,data:{labels,datasets:[{label,data,borderWidth:3,tension:.25,fill:type==="line"}]},options:{responsive:true,maintainAspectRatio:false}})}
-function group(rows,key,val){const o={};rows.forEach(r=>{const k=key(r)||"未設定";o[k]=(o[k]||0)+num(val(r))});return o}
-function text(v){return String(v??"").trim()}function num(v){if(typeof v==="number")return v;const x=Number(String(v??"").replace(/[¥￥円,\s]/g,"").replace(/[^\d.-]/g,""));return Number.isFinite(x)?x:0}
-function dateVal(v){const t=text(v).replace(/\./g,"/").replace(/-/g,"/"),m=t.match(/^(\d{4})\/(\d{1,2})\/(\d{1,2})/);return m?`${m[1]}-${m[2].padStart(2,"0")}-${m[3].padStart(2,"0")}`:t}
-function sum(a){return a.reduce((x,y)=>x+num(y),0)}function fmt(v){return new Intl.NumberFormat("zh-TW",{maximumFractionDigits:2}).format(Number(v)||0)}function esc(v){return text(v).replaceAll("&","&amp;").replaceAll("<","&lt;").replaceAll(">","&gt;").replaceAll('"',"&quot;").replaceAll("'","&#039;")}
+import {firebaseConfig} from './firebase-config.js';
+import {initializeApp} from 'https://www.gstatic.com/firebasejs/10.12.4/firebase-app.js';
+import {getAuth,onAuthStateChanged,signInWithEmailAndPassword,sendPasswordResetEmail,signOut} from 'https://www.gstatic.com/firebasejs/10.12.4/firebase-auth.js';
+import {getFirestore,doc,getDoc,setDoc,collection,getDocs,query,where,writeBatch,serverTimestamp,Timestamp,orderBy,limit} from 'https://www.gstatic.com/firebasejs/10.12.4/firebase-firestore.js';
+const app=initializeApp(firebaseConfig),auth=getAuth(app),db=getFirestore(app),$=id=>document.getElementById(id);
+const state={user:null,role:'viewer',sales:[],compare:[],products:new Map(),platforms:new Set(),charts:{}};
+const titles={overview:'營運總覽',platforms:'平台比較',products:'商品跨平台',groups:'商品分組',master:'商品主檔',import:'資料匯入',history:'匯入紀錄'};
+document.querySelectorAll('[data-page]').forEach(b=>b.onclick=()=>show(b.dataset.page));
+function show(id){document.querySelectorAll('[data-page]').forEach(b=>b.classList.toggle('active',b.dataset.page===id));document.querySelectorAll('.page').forEach(s=>s.classList.toggle('active',s.id===id));$('title').textContent=titles[id]||'';if(id==='history')loadHistory()}
+$('loginBtn').onclick=async()=>{try{$('loginMsg').textContent='登入中…';await signInWithEmailAndPassword(auth,$('email').value.trim(),$('password').value)}catch(e){$('loginMsg').textContent=e.code?.includes('invalid-credential')?'Email 或密碼不正確':e.message}};
+$('resetBtn').onclick=async()=>{const e=$('email').value.trim();if(!e)return $('loginMsg').textContent='請先輸入 Email';try{await sendPasswordResetEmail(auth,e);$('loginMsg').textContent='重設密碼信已寄出'}catch(x){$('loginMsg').textContent=x.message}};
+$('logoutBtn').onclick=()=>signOut(auth);$('refreshBtn').onclick=()=>loadReports();$('applyBtn').onclick=()=>loadReports();$('productSearch').oninput=renderProducts;$('masterSearch').oninput=renderMaster;
+onAuthStateChanged(auth,async user=>{$('loading').classList.add('hidden');if(!user){$('login').classList.remove('hidden');$('app').classList.add('hidden');return}state.user=user;await ensureUser();await loadRole();applyRole();$('userText').textContent=user.email||'';$('roleText').textContent='角色：'+state.role;$('login').classList.add('hidden');$('app').classList.remove('hidden');setDates();await loadProductMaster();await loadPlatforms();await loadReports()});
+async function ensureUser(){const r=doc(db,'users',state.user.uid),s=await getDoc(r);if(!s.exists())await setDoc(r,{email:state.user.email||'',role:'viewer',createdAt:serverTimestamp(),lastLogin:serverTimestamp()});else await setDoc(r,{lastLogin:serverTimestamp()},{merge:true})}
+async function loadRole(){const s=await getDoc(doc(db,'users',state.user.uid));state.role=s.exists()?(s.data().role||'viewer'):'viewer'}
+function applyRole(){const edit=['admin','manager'].includes(state.role);document.querySelectorAll('.editor').forEach(x=>x.classList.toggle('hidden',!edit));$('viewerNotice').classList.toggle('hidden',edit)}
+function setDates(){const n=new Date(),s=new Date(n.getFullYear(),n.getMonth(),1);$('start').value=fd(s);$('end').value=fd(n)}function fd(d){return d.toISOString().slice(0,10)}
+async function loadProductMaster(){const s=await getDocs(collection(db,'products'));state.products=new Map(s.docs.map(d=>[d.id,{id:d.id,...d.data()}]));renderMaster()}
+async function loadPlatforms(){const s=await getDocs(collection(db,'platforms'));state.platforms=new Set(s.docs.map(d=>d.id));$('platform').innerHTML='<option value="">全部平台</option>'+[...state.platforms].sort().map(p=>`<option>${esc(p)}</option>`).join('')}
+async function loadReports(){const s=$('start').value,e=$('end').value;if(!s||!e)return;state.sales=await fetchSales(s,e,$('platform').value);if($('compare').value==='none')state.compare=[];else{const [cs,ce]=compareRange(s,e,$('compare').value);state.compare=await fetchSales(cs,ce,$('platform').value)}renderAll()}
+async function fetchSales(s,e,p){const qy=query(collection(db,'sales'),where('saleDate','>=',Timestamp.fromDate(new Date(s+'T00:00:00'))),where('saleDate','<=',Timestamp.fromDate(new Date(e+'T23:59:59'))));const snap=await getDocs(qy);return snap.docs.map(d=>({id:d.id,...d.data()})).filter(x=>!p||x.platform===p)}
+function compareRange(s,e,m){const a=new Date(s),b=new Date(e);if(m==='yoy'){a.setFullYear(a.getFullYear()-1);b.setFullYear(b.getFullYear()-1);return[fd(a),fd(b)]}const days=Math.round((b-a)/86400000)+1,ce=new Date(a);ce.setDate(ce.getDate()-1);const cs=new Date(ce);cs.setDate(cs.getDate()-days+1);return[fd(cs),fd(ce)]}
+function sum(a){return a.reduce((x,y)=>x+num(y),0)}function summary(r){return{revenue:sum(r.map(x=>x.revenue)),quantity:sum(r.map(x=>x.quantity)),orders:new Set(r.map(x=>x.orderId)).size,products:new Set(r.map(x=>x.productId)).size}}
+function growth(a,b){if(!state.compare.length)return{text:'—',cls:'muted'};if(!b)return{text:a?'無比較基準':'0.0%',cls:'muted'};const p=(a-b)/b*100;return{text:(p>=0?'+':'')+p.toFixed(1)+'%',cls:p>0?'pos':p<0?'neg':'muted'}}
+function renderAll(){renderKpis();renderTrend();renderShare();renderPlatforms();renderProducts();renderGroups()}
+function renderKpis(){const a=summary(state.sales),b=summary(state.compare),cards=[['營收',a.revenue,b.revenue,true],['訂單數',a.orders,b.orders],['銷售數量',a.quantity,b.quantity],['商品數',a.products,b.products],['平均客單價',a.orders?a.revenue/a.orders:0,b.orders?b.revenue/b.orders:0,true]];$('kpis').innerHTML=cards.map(([n,v,c,m])=>{const g=growth(v,c);return`<div class="kpi"><span>${n}</span><strong>${m?yen(v):fmt(v)}</strong><small class="${g.cls}">${g.text}</small></div>`}).join('')}
+function by(rows,key,val){const o={};rows.forEach(r=>{const k=key(r)||'未設定';o[k]=(o[k]||0)+num(val(r))});return o}
+function renderTrend(){const a=by(state.sales,r=>month(r.saleDate),r=>r.revenue),b=by(state.compare,r=>month(r.saleDate),r=>r.revenue),labels=[...new Set([...Object.keys(a),...Object.keys(b)])].sort();chart('trend','line',labels,[{label:'本期',data:labels.map(x=>a[x]||0)},{label:'比較期',data:labels.map(x=>b[x]||0)}])}
+function renderShare(){const g=Object.entries(by(state.sales,r=>r.platform,r=>r.revenue)).sort((a,b)=>b[1]-a[1]);chart('share','doughnut',g.map(x=>x[0]),[{label:'營收',data:g.map(x=>x[1])}])}
+function renderPlatforms(){const ks=[...new Set([...state.sales.map(x=>x.platform),...state.compare.map(x=>x.platform)])].filter(Boolean).sort();$('platformRows').innerHTML=ks.map(k=>{const a=summary(state.sales.filter(x=>x.platform===k)),b=summary(state.compare.filter(x=>x.platform===k)),g=growth(a.revenue,b.revenue);return`<tr><td>${esc(k)}</td><td>${yen(a.revenue)}</td><td>${yen(b.revenue)}</td><td>${yen(a.revenue-b.revenue)}</td><td class="${g.cls}">${g.text}</td><td>${fmt(a.quantity)}</td><td>${fmt(a.orders)}</td></tr>`}).join('')}
+function renderProducts(){const q=$('productSearch').value.toLowerCase(),m=new Map();state.sales.forEach(r=>{const k=r.productId+'||'+r.platform;if(!m.has(k))m.set(k,{...r,revenue:0,quantity:0,cmp:0});const x=m.get(k);x.revenue+=num(r.revenue);x.quantity+=num(r.quantity)});state.compare.forEach(r=>{const k=r.productId+'||'+r.platform;if(!m.has(k))m.set(k,{...r,revenue:0,quantity:0,cmp:0});m.get(k).cmp+=num(r.revenue)});$('productRows').innerHTML=[...m.values()].filter(x=>!q||(x.productId+' '+x.productName).toLowerCase().includes(q)).sort((a,b)=>b.revenue-a.revenue).slice(0,500).map(x=>{const g=growth(x.revenue,x.cmp);return`<tr><td>${esc(x.productId)}</td><td>${esc(x.productName)}</td><td>${esc(x.platform)}</td><td>${yen(x.revenue)}</td><td>${yen(x.cmp)}</td><td class="${g.cls}">${g.text}</td><td>${fmt(x.quantity)}</td></tr>`}).join('')}
+function renderGroups(){const total=sum(state.sales.map(x=>x.revenue)),m=new Map();state.sales.forEach(r=>{const k=state.products.get(r.productId)?.group||'未分類';if(!m.has(k))m.set(k,{rev:0,cmp:0,qty:0});const x=m.get(k);x.rev+=num(r.revenue);x.qty+=num(r.quantity)});state.compare.forEach(r=>{const k=state.products.get(r.productId)?.group||'未分類';if(!m.has(k))m.set(k,{rev:0,cmp:0,qty:0});m.get(k).cmp+=num(r.revenue)});$('groupRows').innerHTML=[...m.entries()].sort((a,b)=>b[1].rev-a[1].rev).map(([k,x])=>{const g=growth(x.rev,x.cmp);return`<tr><td>${esc(k)}</td><td>${yen(x.rev)}</td><td>${yen(x.cmp)}</td><td>${yen(x.rev-x.cmp)}</td><td class="${g.cls}">${g.text}</td><td>${fmt(x.qty)}</td><td>${total?(x.rev/total*100).toFixed(1):0}%</td></tr>`}).join('')}
+function renderMaster(){const q=$('masterSearch').value.toLowerCase();$('masterRows').innerHTML=[...state.products.values()].filter(p=>!q||(p.id+' '+(p.name||'')+' '+(p.group||'')).toLowerCase().includes(q)).sort((a,b)=>a.id.localeCompare(b.id)).map(p=>`<tr><td>${esc(p.id)}</td><td>${esc(p.name)}</td><td>${esc(p.group)}</td><td>${esc(p.brand)}</td><td>${esc(p.category1)}</td><td>${esc(p.category2)}</td></tr>`).join('')}
+$('productFile').onchange=e=>e.target.files?.[0]&&importProducts(e.target.files[0]);
+async function importProducts(file){$('productStatus').textContent='讀取中…';Papa.parse(file,{header:true,skipEmptyLines:'greedy',complete:async r=>{try{const rows=r.data.map(x=>({id:pick(x,['商品編號','商品番号','SKU','sku']),name:pick(x,['商品名稱','商品名']),group:pick(x,['分組','グループ','group']),brand:pick(x,['品牌','ブランド','brand']),category1:pick(x,['大分類','カテゴリ1']),category2:pick(x,['中分類','カテゴリ2'])})).filter(x=>x.id);await batchWrite('products',rows,x=>x.id);await logImport('productMaster','',file.name,rows.length,rows.length,0);$('productStatus').textContent='完成：'+rows.length+' 筆';await loadProductMaster();renderGroups()}catch(e){$('productStatus').textContent=e.message}}})}
+$('salesFile').onchange=e=>e.target.files?.[0]&&importSales(e.target.files[0]);
+async function importSales(file){const p=$('importPlatform').value.trim();if(!p)return $('salesStatus').textContent='請先輸入平台名稱';$('salesStatus').textContent='讀取中…';Papa.parse(file,{header:true,skipEmptyLines:'greedy',complete:async r=>{try{const rows=r.data.map((x,i)=>{const date=pick(x,['日期','日付','注文日']),orderId=pick(x,['訂單編號','注文番号']),productId=pick(x,['商品編號','商品番号','SKU','sku']),productName=pick(x,['商品名稱','商品名']),line=pick(x,['明細序號','明細番号'])||String(i+1);if(!date||!orderId||!productId)return null;const d=parseDate(date);return{id:safe(p+'_'+orderId+'_'+productId+'_'+line),platform:p,orderId,productId,productName,quantity:num(pick(x,['數量','個数','数量'])),revenue:num(pick(x,['營收','売上金額','金額'])),saleDate:Timestamp.fromDate(d),year:d.getFullYear(),month:d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0'),sourceFile:file.name,updatedAt:serverTimestamp()}}).filter(Boolean);let write=rows,skipped=0;if($('duplicate').value==='skip'){const checks=await Promise.all(rows.map(x=>getDoc(doc(db,'sales',x.id))));write=rows.filter((_,i)=>!checks[i].exists());skipped=rows.length-write.length}await batchWrite('sales',write,x=>x.id);await setDoc(doc(db,'platforms',p),{name:p,updatedAt:serverTimestamp()},{merge:true});await logImport('sales',p,file.name,rows.length,write.length,skipped);$('salesStatus').textContent=`完成：讀取 ${rows.length}、寫入 ${write.length}、跳過 ${skipped}`;await loadPlatforms();await loadReports()}catch(e){$('salesStatus').textContent=e.message}}})}
+async function batchWrite(c,rows,id){for(let i=0;i<rows.length;i+=450){const b=writeBatch(db);rows.slice(i,i+450).forEach(x=>b.set(doc(db,c,id(x)),{...x,updatedAt:serverTimestamp()},{merge:true}));await b.commit()}}
+async function logImport(type,platform,fileName,total,written,skipped){await setDoc(doc(collection(db,'imports')),{type,platform,fileName,total,written,skipped,importedBy:state.user.email||'',importedAt:serverTimestamp()})}
+async function loadHistory(){const s=await getDocs(query(collection(db,'imports'),orderBy('importedAt','desc'),limit(100)));$('historyRows').innerHTML=s.docs.map(d=>{const x=d.data();return`<tr><td>${x.importedAt?.toDate?x.importedAt.toDate().toLocaleString('zh-TW'):''}</td><td>${esc(x.type)}</td><td>${esc(x.platform)}</td><td>${esc(x.fileName)}</td><td>${fmt(x.total)}</td><td>${fmt(x.written)}</td><td>${fmt(x.skipped)}</td><td>${esc(x.importedBy)}</td></tr>`}).join('')}
+function chart(id,type,labels,datasets){state.charts[id]?.destroy();state.charts[id]=new Chart($(id),{type,data:{labels,datasets},options:{responsive:true,maintainAspectRatio:false}})}function month(t){const d=t?.toDate?t.toDate():new Date(t);return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')}function pick(o,n){for(const k of n)if(o[k]!==undefined&&String(o[k]).trim()!=='')return String(o[k]).trim();return''}function parseDate(v){const s=String(v).replace(/\./g,'/').replace(/-/g,'/'),m=s.match(/^(\d{4})\/(\d{1,2})\/(\d{1,2})/);if(m)return new Date(+m[1],+m[2]-1,+m[3]);const d=new Date(v);if(isNaN(d))throw new Error('無法辨識日期：'+v);return d}function safe(s){return s.replace(/[\/#?\[\]]/g,'_').slice(0,1400)}function num(v){const n=Number(String(v??'').replace(/[¥￥円,\s]/g,'').replace(/[^\d.-]/g,''));return isFinite(n)?n:0}function fmt(v){return new Intl.NumberFormat('zh-TW',{maximumFractionDigits:2}).format(Number(v)||0)}function yen(v){return new Intl.NumberFormat('ja-JP',{style:'currency',currency:'JPY',maximumFractionDigits:0}).format(Number(v)||0)}function esc(v){return String(v??'').replaceAll('&','&amp;').replaceAll('<','&lt;').replaceAll('>','&gt;').replaceAll('"','&quot;').replaceAll("'",'&#039;')}
