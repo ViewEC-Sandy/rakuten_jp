@@ -4,7 +4,7 @@ import {getAuth,onAuthStateChanged,signInWithEmailAndPassword,sendPasswordResetE
 import {getFirestore,doc,getDoc,setDoc,collection,getDocs,query,where,writeBatch,serverTimestamp,Timestamp,orderBy,limit} from 'https://www.gstatic.com/firebasejs/10.12.4/firebase-firestore.js';
 
 const app=initializeApp(firebaseConfig),auth=getAuth(app),db=getFirestore(app),$=id=>document.getElementById(id);
-const state={user:null,role:'viewer',sales:[],compare:[],products:new Map(),platforms:new Set(),ads:[],charts:{}};
+const state={user:null,role:'viewer',sales:[],compare:[],products:new Map(),productsByManagement:new Map(),platforms:new Set(),ads:[],charts:{}};
 const titles={overview:'營運總覽',platforms:'平台比較',products:'商品跨平台',groups:'專案分析',ads:'樂天廣告分析',master:'商品主檔',import:'資料匯入',history:'匯入紀錄'};
 
 const salesImportProfiles={
@@ -24,9 +24,9 @@ async function ensureUser(){const r=doc(db,'users',state.user.uid),s=await getDo
 async function loadRole(){const s=await getDoc(doc(db,'users',state.user.uid));state.role=s.exists()?(s.data().role||'viewer'):'viewer'}
 function applyRole(){const edit=['admin','manager'].includes(state.role);document.querySelectorAll('.editor').forEach(x=>x.classList.toggle('hidden',!edit));$('viewerNotice').classList.toggle('hidden',edit)}
 function setDates(){const n=new Date(),s=new Date(n.getFullYear(),n.getMonth(),1);$('start').value=fd(s);$('end').value=fd(n)}function fd(d){return d.toISOString().slice(0,10)}
-async function loadProductMaster(){const s=await getDocs(collection(db,'products'));const rows=s.docs.map(d=>({id:d.id,...d.data()}));state.products=new Map(rows.map(x=>[String(x.id),x]));renderMaster();fillAdProjectFilter()}
+async function loadProductMaster(){const s=await getDocs(collection(db,'products'));const rows=s.docs.map(d=>({id:d.id,...d.data()}));state.products=new Map(rows.map(x=>[String(x.id),x]));state.productsByManagement=new Map(rows.filter(x=>String(x.managementNumber||'').trim()).map(x=>[String(x.managementNumber).trim(),x]));renderMaster();fillAdProjectFilter()}
 function findProduct(productNumber){return state.products.get(String(productNumber))||null}
-function findProductByManagementNumber(value){const v=String(value||'').trim();for(const p of state.products.values())if(String(p.managementNumber||'').trim()===v)return p;return null}
+function findProductByManagementNumber(value){return state.productsByManagement.get(String(value||'').trim())||null}
 async function loadPlatforms(){const s=await getDocs(collection(db,'platforms'));state.platforms=new Set(s.docs.map(d=>d.id));$('platform').innerHTML='<option value="">全部平台</option>'+[...state.platforms].sort().map(p=>`<option>${esc(p)}</option>`).join('')}
 async function loadReports(){const s=$('start').value,e=$('end').value;if(!s||!e)return;state.sales=await fetchSales(s,e,$('platform').value);if($('compare').value==='none')state.compare=[];else{const [cs,ce]=compareRange(s,e,$('compare').value);state.compare=await fetchSales(cs,ce,$('platform').value)}renderAll()}
 async function fetchSales(s,e,p){const qy=query(collection(db,'sales'),where('saleDate','>=',Timestamp.fromDate(new Date(s+'T00:00:00'))),where('saleDate','<=',Timestamp.fromDate(new Date(e+'T23:59:59'))));const snap=await getDocs(qy);return snap.docs.map(d=>({id:d.id,...d.data()})).filter(x=>!p||x.platform===p)}
@@ -51,7 +51,47 @@ $('salesFile').onchange=e=>e.target.files?.[0]&&importSales(e.target.files[0]);
 async function importSales(file){const p=$('importPlatform').value,profile=salesImportProfiles[p];if(!profile)return $('salesStatus').textContent='請先選擇平台';$('salesStatus').textContent='讀取中…';Papa.parse(file,{header:true,skipEmptyLines:'greedy',complete:async r=>{try{const rows=r.data.map((x,i)=>{const date=pick(x,profile.date),orderId=pick(x,profile.orderId),productId=pick(x,profile.productId),managementNumber=pick(x,profile.managementNumber),line=String(i+1);if(!date||!orderId||!productId)return null;const d=parseDate(date),quantity=num(pick(x,profile.quantity)),unitPrice=num(pick(x,profile.unitPrice)),directRevenue=pick(x,profile.revenue),revenue=directRevenue?num(directRevenue):unitPrice*quantity;return{id:safe(p+'_'+orderId+'_'+productId+'_'+line),platform:p,orderId,productId,managementNumber,quantity,unitPrice,revenue,saleDate:Timestamp.fromDate(d),year:d.getFullYear(),month:monthFromDate(d),sourceFile:file.name,updatedAt:serverTimestamp()}}).filter(Boolean);let write=rows,skipped=0;if($('duplicate').value==='skip'){const checks=await Promise.all(rows.map(x=>getDoc(doc(db,'sales',x.id))));write=rows.filter((_,i)=>!checks[i].exists());skipped=rows.length-write.length}await batchWrite('sales',write,x=>x.id);await setDoc(doc(db,'platforms',p),{name:p,updatedAt:serverTimestamp()},{merge:true});await logImport('sales',p,file.name,rows.length,write.length,skipped);$('salesStatus').textContent=`完成：讀取 ${rows.length}、寫入 ${write.length}、跳過 ${skipped}`;await loadPlatforms();await loadReports()}catch(e){console.error(e);$('salesStatus').textContent='匯入失敗：'+e.message}}})}
 
 $('adFile').onchange=e=>e.target.files?.[0]&&importAds(e.target.files[0]);
-async function importAds(file){$('adStatus').textContent='讀取中…';Papa.parse(file,{header:true,skipEmptyLines:'greedy',complete:async r=>{try{const rows=r.data.map((x,i)=>{const dateText=pick(x,['日付']),managementNumber=pick(x,['商品管理番号']);if(!dateText||!managementNumber)return null;const d=parseDate(dateText),product=findProductByManagementNumber(managementNumber),clicks=num(pick(x,['クリック数(合計)'])),adSpend=num(pick(x,['実績額(合計)'])),salesAmount=num(pick(x,['売上金額(合計720時間)'])),salesOrders=num(pick(x,['売上件数(合計720時間)'])),ctr=num(pick(x,['CTR(%)']));return{id:safe('rakuten_ads_'+fdLocal(d)+'_'+managementNumber+'_'+(i+1)),platform:'rakuten',adDate:Timestamp.fromDate(d),month:monthFromDate(d),managementNumber,productId:product?.id||'',ctr,clicks,adSpend,salesAmount,salesOrders,cvr:clicks?salesOrders/clicks*100:0,roas:adSpend?salesAmount/adSpend*100:0,sourceFile:file.name}}).filter(Boolean);let write=rows,skipped=0;if($('adDuplicate').value==='skip'){const checks=await Promise.all(rows.map(x=>getDoc(doc(db,'ads',x.id))));write=rows.filter((_,i)=>!checks[i].exists());skipped=rows.length-write.length}await batchWrite('ads',write,x=>x.id);await logImport('rakutenAds','rakuten',file.name,rows.length,write.length,skipped);$('adStatus').textContent=`完成：讀取 ${rows.length}、寫入 ${write.length}、跳過 ${skipped}`;$('adFile').value='';await loadAds()}catch(e){console.error(e);$('adStatus').textContent='匯入失敗：'+e.message}}})}
+async function importAds(file){
+  $('adStatus').textContent='讀取中…';
+  Papa.parse(file,{header:true,skipEmptyLines:'greedy',complete:async r=>{
+    try{
+      if(r.errors?.length)throw new Error(`CSV 解析錯誤：第 ${r.errors[0].row+2} 列 ${r.errors[0].message}`);
+      const grouped=new Map();
+      r.data.forEach((x,i)=>{
+        const rowNo=i+2,dateText=pick(x,['日付']),managementNumber=pick(x,['商品管理番号']);
+        if(!dateText&&!managementNumber)return;
+        if(!dateText)throw new Error(`第 ${rowNo} 列缺少「日付」`);
+        if(!managementNumber)throw new Error(`第 ${rowNo} 列缺少「商品管理番号」`);
+        let d;
+        try{d=parseRakutenAdDate(dateText)}catch(e){throw new Error(`第 ${rowNo} 列：${e.message}`)}
+        const monthKey=monthFromDate(d),key=monthKey+'||'+managementNumber;
+        const clicks=num(pick(x,['クリック数(合計)','クリック数']));
+        const adSpend=num(pick(x,['実績額(合計)','実績額']));
+        const salesAmount=num(pick(x,['売上金額(合計720時間)','売上金額(720時間)','売上金額']));
+        const salesOrders=num(pick(x,['売上件数(合計720時間)','売上件数(720時間)','売上件数']));
+        const ctr=num(pick(x,['CTR(%)','CTR']));
+        if(!grouped.has(key))grouped.set(key,{month:monthKey,adDate:d,managementNumber,clicks:0,adSpend:0,salesAmount:0,salesOrders:0,ctrWeighted:0,ctrWeight:0});
+        const g=grouped.get(key),weight=Math.max(clicks,1);
+        g.clicks+=clicks;g.adSpend+=adSpend;g.salesAmount+=salesAmount;g.salesOrders+=salesOrders;g.ctrWeighted+=ctr*weight;g.ctrWeight+=weight;
+      });
+      const rows=[...grouped.values()].map(g=>{
+        const product=findProductByManagementNumber(g.managementNumber),ctr=g.ctrWeight?g.ctrWeighted/g.ctrWeight:0;
+        return{id:safe('rakuten_ads_'+g.month+'_'+g.managementNumber),platform:'rakuten',adDate:Timestamp.fromDate(g.adDate),month:g.month,managementNumber:g.managementNumber,productId:product?.id||'',ctr,clicks:g.clicks,adSpend:g.adSpend,salesAmount:g.salesAmount,salesOrders:g.salesOrders,cvr:g.clicks?g.salesOrders/g.clicks*100:0,roas:g.adSpend?g.salesAmount/g.adSpend*100:0,sourceFile:file.name};
+      });
+      if(!rows.length)throw new Error('CSV 中找不到可匯入的廣告資料');
+      let write=rows,skipped=0;
+      if($('adDuplicate').value==='skip'){
+        const checks=await Promise.all(rows.map(x=>getDoc(doc(db,'ads',x.id))));
+        write=rows.filter((_,i)=>!checks[i].exists());skipped=rows.length-write.length;
+      }
+      await batchWrite('ads',write,x=>x.id);
+      await logImport('rakutenAds','rakuten',file.name,rows.length,write.length,skipped);
+      const unmatched=rows.filter(x=>!x.productId).length;
+      $('adStatus').textContent=`完成：彙整 ${rows.length} 筆、寫入 ${write.length}、跳過 ${skipped}${unmatched?`、未對應商品 ${unmatched} 筆`:''}`;
+      $('adFile').value='';await loadAds();
+    }catch(e){console.error(e);$('adStatus').textContent='匯入失敗：'+e.message}
+  }});
+}
 
 async function loadAds(){const s=await getDocs(collection(db,'ads'));state.ads=s.docs.map(d=>({id:d.id,...d.data()}));fillAdMonthFilter();renderAds()}
 function fillAdMonthFilter(){const current=$('adMonthFilter').value,months=[...new Set(state.ads.map(x=>x.month).filter(Boolean))].sort().reverse();$('adMonthFilter').innerHTML='<option value="">全部月份</option>'+months.map(m=>`<option value="${esc(m)}">${esc(m)}</option>`).join('');$('adMonthFilter').value=current}
@@ -64,5 +104,6 @@ async function loadHistory(){const s=await getDocs(query(collection(db,'imports'
 function chart(id,type,labels,datasets){state.charts[id]?.destroy();state.charts[id]=new Chart($(id),{type,data:{labels,datasets},options:{responsive:true,maintainAspectRatio:false}})}
 function month(t){const d=t?.toDate?t.toDate():new Date(t);return monthFromDate(d)}function monthFromDate(d){return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')}function fdLocal(d){return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0')}
 function pick(o,n){for(const k of n)if(o[k]!==undefined&&String(o[k]).trim()!=='')return String(o[k]).trim();return''}
-function parseDate(v){const s=String(v).trim().replace(/\./g,'/').replace(/-/g,'/'),m=s.match(/^(\d{4})\/(\d{1,2})\/(\d{1,2})/);if(m)return new Date(+m[1],+m[2]-1,+m[3]);const d=new Date(v);if(isNaN(d))throw new Error('無法辨識日期：'+v);return new Date(d.getFullYear(),d.getMonth(),d.getDate())}
+function parseDate(v){const raw=String(v||'').trim();if(!raw)throw new Error('日期欄位為空');const jp=raw.match(/(\d{4})年(\d{1,2})月(\d{1,2})日/);if(jp)return new Date(+jp[1],+jp[2]-1,+jp[3]);const s=raw.replace(/\./g,'/').replace(/-/g,'/'),m=s.match(/^(\d{4})\/(\d{1,2})\/(\d{1,2})/);if(m)return new Date(+m[1],+m[2]-1,+m[3]);const d=new Date(raw);if(isNaN(d))throw new Error('無法辨識日期：'+raw);return new Date(d.getFullYear(),d.getMonth(),d.getDate())}
+function parseRakutenAdDate(v){const s=String(v||'').trim(),m=s.match(/(\d{4})年(\d{1,2})月(\d{1,2})日/);if(m)return new Date(+m[1],+m[2]-1,+m[3]);return parseDate(v)}
 function safe(s){return String(s).replace(/[\/#?\[\]]/g,'_').slice(0,1400)}function num(v){const n=Number(String(v??'').replace(/[¥￥円,\s]/g,'').replace(/[^\d.-]/g,''));return isFinite(n)?n:0}function fmt(v){return new Intl.NumberFormat('zh-TW',{maximumFractionDigits:2}).format(Number(v)||0)}function yen(v){return new Intl.NumberFormat('ja-JP',{style:'currency',currency:'JPY',maximumFractionDigits:0}).format(Number(v)||0)}function pct(v){return `${fmt(v)}%`}function esc(v){return String(v??'').replaceAll('&','&amp;').replaceAll('<','&lt;').replaceAll('>','&gt;').replaceAll('"','&quot;').replaceAll("'",'&#039;')}
