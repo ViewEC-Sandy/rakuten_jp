@@ -204,5 +204,19 @@ function chart(id,type,labels,datasets,extraOptions={}){state.charts[id]?.destro
 function month(t){const d=t?.toDate?t.toDate():new Date(t);return monthFromDate(d)}function monthFromDate(d){return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')}function fdLocal(d){return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0')}
 function pick(o,n){for(const k of n)if(o[k]!==undefined&&String(o[k]).trim()!=='')return String(o[k]).trim();return''}
 function parseDate(v){const raw=String(v||'').trim();if(!raw)throw new Error('日期欄位為空');const jp=raw.match(/(\d{4})年(\d{1,2})月(\d{1,2})日/);if(jp)return new Date(+jp[1],+jp[2]-1,+jp[3]);const s=raw.replace(/\./g,'/').replace(/-/g,'/'),m=s.match(/^(\d{4})\/(\d{1,2})\/(\d{1,2})/);if(m)return new Date(+m[1],+m[2]-1,+m[3]);const d=new Date(raw);if(isNaN(d))throw new Error('無法辨識日期：'+raw);return new Date(d.getFullYear(),d.getMonth(),d.getDate())}
-function parseRakutenAdDate(v){const s=String(v||'').trim(),m=s.match(/(\d{4})年(\d{1,2})月(\d{1,2})日/);if(m)return new Date(+m[1],+m[2]-1,+m[3]);return parseDate(v)}
+function parseRakutenAdDate(v){
+  const raw=String(v||'').trim();
+  if(!raw)throw new Error('日期欄位為空');
+  // Rakuten advertising exports may use either a daily date (2025年01月15日)
+  // or a monthly period (2025年01月). Monthly rows are stored as the first day
+  // of that month because the ads collection is aggregated by month.
+  const jpDay=raw.match(/^(\d{4})年(\d{1,2})月(\d{1,2})日$/);
+  if(jpDay)return new Date(+jpDay[1],+jpDay[2]-1,+jpDay[3]);
+  const jpMonth=raw.match(/^(\d{4})年(\d{1,2})月$/);
+  if(jpMonth)return new Date(+jpMonth[1],+jpMonth[2]-1,1);
+  const normalized=raw.replace(/\./g,'/').replace(/-/g,'/');
+  const slashMonth=normalized.match(/^(\d{4})\/(\d{1,2})$/);
+  if(slashMonth)return new Date(+slashMonth[1],+slashMonth[2]-1,1);
+  return parseDate(raw);
+}
 function safe(s){return String(s).replace(/[\/#?\[\]]/g,'_').slice(0,1400)}function num(v){const n=Number(String(v??'').replace(/[¥￥円,\s]/g,'').replace(/[^\d.-]/g,''));return isFinite(n)?n:0}function fmt(v){return new Intl.NumberFormat('zh-TW',{maximumFractionDigits:2}).format(Number(v)||0)}function yen(v){return new Intl.NumberFormat('ja-JP',{style:'currency',currency:'JPY',maximumFractionDigits:0}).format(Number(v)||0)}function twd(v){return new Intl.NumberFormat('zh-TW',{style:'currency',currency:'TWD',maximumFractionDigits:0}).format(Number(v)||0)}function pct(v){return `${fmt(v)}%`}function esc(v){return String(v??'').replaceAll('&','&amp;').replaceAll('<','&lt;').replaceAll('>','&gt;').replaceAll('"','&quot;').replaceAll("'",'&#039;')}
