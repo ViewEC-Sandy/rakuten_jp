@@ -10,7 +10,7 @@ const isHiddenProject=value=>HIDE_PROJECTS.has(String(value||'').trim());
 const titles={overview:'營運總覽',platforms:'平台比較',products:'商品跨平台',groups:'專案分析',ads:'樂天廣告分析',productAnalysis:'商品分析',master:'商品主檔',import:'資料匯入',history:'匯入紀錄'};
 
 const salesImportProfiles={
-  rakuten:{orderId:['注文番号'],date:['注文日'],productId:['商品番号'],managementNumber:['商品管理番号'],quantity:['個数','数量'],unitPrice:['単価','商品単価'],revenue:['売上金額','金額'],status:['ステータス'],cancelled:['900']},
+  rakuten:{orderId:['注文番号'],date:['注文日'],productId:['商品番号'],managementNumber:['商品管理番号'],quantity:['個数','数量'],unitPrice:['単価','商品単価'],revenue:['売上金額','金額'],coupon:['店舗発行クーポン利用額'],status:['ステータス'],cancelled:['900']},
   shopify:{orderId:['Name'],date:['Paid at'],productId:['Lineitem sku'],managementNumber:['Variant SKU','商品管理番号'],quantity:['Lineitem quantity'],unitPrice:['Lineitem price'],revenue:['Total'],status:['Financial Status'],cancelled:['refunded']}
 };
 
@@ -74,8 +74,8 @@ async function importSales(file){
       if((profile.cancelled||[]).some(v=>status===String(v).toLowerCase())){cancelled++;return null}
       const date=pick(x,profile.date),orderId=pick(x,profile.orderId),productId=pick(x,profile.productId),managementNumber=pick(x,profile.managementNumber),line=String(i+1);
       if(!date||!orderId||!productId)return null;
-      const d=parseDate(date),quantity=num(pick(x,profile.quantity)),unitPrice=num(pick(x,profile.unitPrice)),directRevenue=pick(x,profile.revenue),revenue=directRevenue?num(directRevenue):unitPrice*quantity;
-      return{id:safe(p+'_'+orderId+'_'+productId+'_'+line),platform:canonicalPlatform(p),orderId,productId,managementNumber,quantity,unitPrice,revenue,saleDate:Timestamp.fromDate(d),year:d.getFullYear(),month:monthFromDate(d),sourceFile:file.name,updatedAt:serverTimestamp()}
+      const d=parseDate(date),quantity=num(pick(x,profile.quantity)),unitPrice=num(pick(x,profile.unitPrice)),directRevenue=pick(x,profile.revenue),grossRevenue=directRevenue?num(directRevenue):unitPrice*quantity,couponAmount=p==='rakuten'?num(pick(x,profile.coupon||[])):0,revenue=grossRevenue-couponAmount;
+      return{id:safe(p+'_'+orderId+'_'+productId+'_'+line),platform:canonicalPlatform(p),orderId,productId,managementNumber,quantity,unitPrice,grossRevenue,couponAmount,revenue,saleDate:Timestamp.fromDate(d),year:d.getFullYear(),month:monthFromDate(d),sourceFile:file.name,updatedAt:serverTimestamp()}
     }).filter(Boolean);
     let write=rows,skipped=0;
     if($('duplicate').value==='skip'){const checks=await Promise.all(rows.map(x=>getDoc(doc(db,'sales',x.id))));write=rows.filter((_,i)=>!checks[i].exists());skipped=rows.length-write.length}

@@ -1,4 +1,4 @@
-# Japan EC Dashboard V10
+# Japan EC Dashboard V10.1
 
 以 V9.1 穩定架構為基礎整合的正式版本。
 
@@ -9,6 +9,7 @@
 - 平台名稱統一：`rakuten` / `Rakuten` 顯示為 `Rakuten`
 - 隱藏專案：`GOOD LIFE`、`Taiwan Pavilion`、`未設定專案`
 - 銷售匯入排除：Rakuten `ステータス=900`、Shopify `Financial Status=refunded`
+- Rakuten 銷售額：匯入時自動扣除 `店舗発行クーポン利用額`
 - 商品主檔：商品供應價顯示為新台幣 NT$，各平台售價維持日圓 ¥
 - 無 MutationObserver，避免持續重排造成瀏覽器卡死
 
