@@ -18,7 +18,7 @@ document.querySelectorAll('[data-page]').forEach(b=>b.onclick=()=>show(b.dataset
 function show(id){document.querySelectorAll('[data-page]').forEach(b=>b.classList.toggle('active',b.dataset.page===id));document.querySelectorAll('.page').forEach(s=>s.classList.toggle('active',s.id===id));$('title').textContent=titles[id]||'';if(id==='history')loadHistory();if(id==='ads')loadAds();if(id==='productAnalysis')loadProductAnalytics()}
 $('loginBtn').onclick=async()=>{try{$('loginMsg').textContent='登入中…';await signInWithEmailAndPassword(auth,$('email').value.trim(),$('password').value)}catch(e){$('loginMsg').textContent=e.code?.includes('invalid-credential')?'Email 或密碼不正確':e.message}};
 $('resetBtn').onclick=async()=>{const e=$('email').value.trim();if(!e)return $('loginMsg').textContent='請先輸入 Email';try{await sendPasswordResetEmail(auth,e);$('loginMsg').textContent='重設密碼信已寄出'}catch(x){$('loginMsg').textContent=x.message}};
-$('logoutBtn').onclick=()=>signOut(auth);$('refreshBtn').onclick=()=>loadReports();$('applyBtn').onclick=()=>loadReports();$('granularity').onchange=()=>renderTrend();$('printBtn').onclick=()=>window.print();$('exportCsvBtn').onclick=exportOverviewCsv;$('productSearch').oninput=renderProducts;$('productProjectFilter').onchange=renderProducts;$('groupSearch').oninput=renderGroups;$('masterSearch').oninput=renderMaster;
+$('logoutBtn').onclick=()=>signOut(auth);$('refreshBtn').onclick=()=>loadReports();$('applyBtn').onclick=()=>loadReports();$('granularity').onchange=()=>renderTrend();$('printBtn').onclick=()=>window.print();$('exportCsvBtn').onclick=()=>exportCurrentPage('csv');$('exportExcelBtn').onclick=()=>exportCurrentPage('xlsx');$('productSearch').oninput=renderProducts;$('productProjectFilter').onchange=renderProducts;$('groupSearch').oninput=renderGroups;$('masterSearch').oninput=renderMaster;
 ['adMonthFilter','adProjectFilter','adSearch','adSort','adOrder'].forEach(id=>$(id).addEventListener(id==='adSearch'?'input':'change',renderAds));
 ['paMonthFilter','paProjectFilter','paSearch','paSort','paOrder'].forEach(id=>$(id).addEventListener(id==='paSearch'?'input':'change',renderProductAnalytics));
 
@@ -81,6 +81,76 @@ function parseCsvAutoHeader(file,headerCandidates){
       }catch(e){reject(e)}
     },error:reject});
   });
+}
+
+function getActivePage(){return document.querySelector('.page.active')}
+function cleanExportText(value=''){return String(value).replace(/\s+/g,' ').trim()}
+function currentReportName(){
+  const page=getActivePage();
+  const title=cleanExportText($('title')?.textContent||page?.id||'report');
+  const suffix=(['overview','platforms','products','groups'].includes(page?.id))?`_${$('start').value||''}_${$('end').value||''}`:'';
+  return `${title}${suffix}`.replace(/[\/:*?"<>|]/g,'_');
+}
+function reportFilterRows(){
+  const page=getActivePage(),rows=[['報表名稱',cleanExportText($('title')?.textContent||'')],['匯出時間',new Date().toLocaleString('zh-TW')]];
+  if(['overview','platforms','products','groups'].includes(page?.id)){
+    rows.push(['平台',$('platform')?.selectedOptions?.[0]?.textContent||'全部平台']);
+    rows.push(['開始日期',$('start')?.value||'']);
+    rows.push(['結束日期',$('end')?.value||'']);
+    rows.push(['比較方式',$('compare')?.selectedOptions?.[0]?.textContent||'']);
+  }
+  page?.querySelectorAll('.subfilters label').forEach(label=>{
+    const input=label.querySelector('input,select');if(!input)return;
+    const name=cleanExportText([...label.childNodes].filter(n=>n.nodeType===Node.TEXT_NODE).map(n=>n.textContent).join(''))||'篩選條件';
+    const value=input.tagName==='SELECT'?(input.selectedOptions?.[0]?.textContent||''):input.value;
+    if(value)rows.push([name,cleanExportText(value)]);
+  });
+  return rows;
+}
+function extractKpiRows(page){
+  const rows=[];
+  page.querySelectorAll('.kpi').forEach(k=>{
+    const name=cleanExportText(k.querySelector('span')?.textContent||'');
+    const value=cleanExportText(k.querySelector('strong')?.textContent||'');
+    if(name||value)rows.push([name,value]);
+  });
+  return rows;
+}
+function extractTableRows(table){
+  const headers=[...table.querySelectorAll('thead th')].map(th=>cleanExportText(th.textContent));
+  const rows=[...table.tBodies].flatMap(tb=>[...tb.rows].filter(tr=>!tr.hidden).map(tr=>[...tr.cells].map(td=>cleanExportText(td.textContent))));
+  return headers.length?[headers,...rows]:rows;
+}
+function collectCurrentReport(){
+  const page=getActivePage();if(!page)throw new Error('找不到目前頁面');
+  const sections=[{name:'報表資訊',rows:reportFilterRows()}];
+  const kpis=extractKpiRows(page);if(kpis.length)sections.push({name:'KPI摘要',rows:[['指標','數值'],...kpis]});
+  page.querySelectorAll('table').forEach((table,i)=>{
+    const card=table.closest('.card');
+    const title=cleanExportText(card?.querySelector('h3')?.textContent||`資料表${i+1}`);
+    const rows=extractTableRows(table);if(rows.length)sections.push({name:title,rows});
+  });
+  if(page.id==='overview'){
+    const raw=[['日期','平台','訂單編號','商品番号','數量','營收']];
+    state.sales.slice().sort((a,b)=>{const da=a.saleDate?.toDate?a.saleDate.toDate():new Date(a.saleDate),db=b.saleDate?.toDate?b.saleDate.toDate():new Date(b.saleDate);return da-db}).forEach(r=>{const d=r.saleDate?.toDate?r.saleDate.toDate():new Date(r.saleDate);raw.push([fdLocal(d),r.platform,r.orderId,r.productId,r.quantity,r.revenue])});
+    sections.push({name:'銷售明細',rows:raw});
+  }
+  return sections;
+}
+function downloadBlob(content,type,fileName){const blob=new Blob([content],{type}),url=URL.createObjectURL(blob),a=document.createElement('a');a.href=url;a.download=fileName;document.body.appendChild(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(url),1000)}
+function safeSheetName(name,index){const clean=String(name||`Sheet${index}`).replace(/[\\/?*\[\]:]/g,'_').slice(0,31);return clean||`Sheet${index}`}
+function exportCurrentPage(format){
+  try{
+    const sections=collectCurrentReport(),base=currentReportName();
+    if(format==='csv'){
+      const lines=[];sections.forEach((section,i)=>{if(i)lines.push([]);lines.push([section.name]);section.rows.forEach(r=>lines.push(r))});
+      downloadBlob('\ufeff'+lines.map(r=>r.map(csvEscape).join(',')).join('\r\n'),'text/csv;charset=utf-8',`${base}.csv`);return;
+    }
+    if(typeof XLSX==='undefined')throw new Error('Excel 元件尚未載入，請確認網路連線後重新整理');
+    const wb=XLSX.utils.book_new();
+    sections.forEach((section,i)=>{const ws=XLSX.utils.aoa_to_sheet(section.rows);ws['!cols']=section.rows.reduce((cols,row)=>{row.forEach((v,j)=>{cols[j]=Math.min(45,Math.max(cols[j]||10,String(v??'').length+2))});return cols},[]).map(wch=>({wch}));XLSX.utils.book_append_sheet(wb,ws,safeSheetName(section.name,i+1))});
+    XLSX.writeFile(wb,`${base}.xlsx`);
+  }catch(e){console.error(e);alert('匯出失敗：'+e.message)}
 }
 function exportOverviewCsv(){const rows=[['日期','平台','訂單編號','商品番号','數量','營收']];state.sales.slice().sort((a,b)=>{const da=a.saleDate?.toDate?a.saleDate.toDate():new Date(a.saleDate),db=b.saleDate?.toDate?b.saleDate.toDate():new Date(b.saleDate);return da-db}).forEach(r=>{const d=r.saleDate?.toDate?r.saleDate.toDate():new Date(r.saleDate);rows.push([fdLocal(d),r.platform,r.orderId,r.productId,r.quantity,r.revenue])});const blob=new Blob(['\ufeff'+rows.map(r=>r.map(csvEscape).join(',')).join('\n')],{type:'text/csv;charset=utf-8'}),url=URL.createObjectURL(blob),a=document.createElement('a');a.href=url;a.download=`dashboard_${$('start').value}_${$('end').value}.csv`;a.click();URL.revokeObjectURL(url)}
 function renderPlatforms(){const ks=[...new Set([...state.sales.map(x=>x.platform),...state.compare.map(x=>x.platform)])].filter(Boolean).sort();$('platformRows').innerHTML=ks.map(k=>{const a=summary(state.sales.filter(x=>x.platform===k)),b=summary(state.compare.filter(x=>x.platform===k)),g=growth(a.revenue,b.revenue);return`<tr><td>${esc(k)}</td><td>${yen(a.revenue)}</td><td>${yen(b.revenue)}</td><td>${yen(a.revenue-b.revenue)}</td><td class="${g.cls}">${g.text}</td><td>${fmt(a.quantity)}</td><td>${fmt(a.orders)}</td></tr>`}).join('')}
