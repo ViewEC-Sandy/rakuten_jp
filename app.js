@@ -85,8 +85,12 @@ async function importSales(file){
       return{id:safe(p+'_'+orderId+'_'+productId+'_'+line),platform:canonicalPlatform(p),orderId,productId,managementNumber,quantity,unitPrice,grossRevenue,couponAmount,revenue,saleDate:Timestamp.fromDate(d),year:d.getFullYear(),month:monthFromDate(d),sourceFile:file.name,updatedAt:serverTimestamp()}
     }).filter(Boolean);
     let write=rows,skipped=0;
-    if($('duplicate').value==='skip'){const checks=await Promise.all(rows.map(x=>getDoc(doc(db,'sales',x.id))));write=rows.filter((_,i)=>!checks[i].exists());skipped=rows.length-write.length}
-    await batchWrite('sales',write,x=>x.id);const platformName=canonicalPlatform(p);await setDoc(doc(db,'platforms',platformName),{name:platformName,updatedAt:serverTimestamp()},{merge:true});await logImport('sales',p,file.name,r.data.length,write.length,skipped+cancelled);
+    if($('duplicate').value==='skip'){
+      $('salesStatus').textContent=`檢查重複資料中…（${rows.length} 筆）`;
+      const existing=await existingIdSet('sales');
+      write=rows.filter(x=>!existing.has(x.id));skipped=rows.length-write.length;
+    }
+    await batchWrite('sales',write,x=>x.id,(done,total)=>{$('salesStatus').textContent=`匯入銷售資料中… ${done} / ${total}（${Math.round(done/Math.max(total,1)*100)}%）`});const platformName=canonicalPlatform(p);await setDoc(doc(db,'platforms',platformName),{name:platformName,updatedAt:serverTimestamp()},{merge:true});await logImport('sales',p,file.name,r.data.length,write.length,skipped+cancelled);
     $('salesStatus').textContent=`完成：有效 ${rows.length}、寫入 ${write.length}、重複跳過 ${skipped}、取消／退款排除 ${cancelled}`;await loadPlatforms();await loadReports()
   }catch(e){console.error(e);$('salesStatus').textContent='匯入失敗：'+e.message}}})}
 
@@ -122,10 +126,11 @@ async function importAds(file){
       if(!rows.length)throw new Error('CSV 中找不到可匯入的廣告資料');
       let write=rows,skipped=0;
       if($('adDuplicate').value==='skip'){
-        const checks=await Promise.all(rows.map(x=>getDoc(doc(db,'ads',x.id))));
-        write=rows.filter((_,i)=>!checks[i].exists());skipped=rows.length-write.length;
+        $('adStatus').textContent=`檢查重複資料中…（${rows.length} 筆）`;
+        const existing=await existingIdSet('ads');
+        write=rows.filter(x=>!existing.has(x.id));skipped=rows.length-write.length;
       }
-      await batchWrite('ads',write,x=>x.id);
+      await batchWrite('ads',write,x=>x.id,(done,total)=>{$('adStatus').textContent=`匯入樂天廣告中… ${done} / ${total}（${Math.round(done/Math.max(total,1)*100)}%）`});
       await logImport('rakutenAds','rakuten',file.name,rows.length,write.length,skipped);
       const unmatched=rows.filter(x=>!x.productId).length;
       $('adStatus').textContent=`完成：彙整 ${rows.length} 筆、寫入 ${write.length}、跳過 ${skipped}${unmatched?`、未對應商品 ${unmatched} 筆`:''}`;
@@ -158,8 +163,12 @@ async function importProductAnalytics(file){
     });
     const rows=[...grouped.values()].map(g=>{const product=findProduct(g.productId);return{id:safe('product_analysis_'+monthKey+'_'+g.productId),month:monthKey,productId:g.productId,managementNumber:product?.managementNumber||'',...g,sourceFile:file.name}});
     if(!rows.length)throw new Error('CSV 中找不到「商品番号」或可匯入資料');
-    let write=rows,skipped=0;if($('paDuplicate').value==='skip'){const checks=await Promise.all(rows.map(x=>getDoc(doc(db,'productAnalytics',x.id))));write=rows.filter((_,i)=>!checks[i].exists());skipped=rows.length-write.length}
-    await batchWrite('productAnalytics',write,x=>x.id);await logImport('productAnalytics','rakuten',file.name,rows.length,write.length,skipped);
+    let write=rows,skipped=0;if($('paDuplicate').value==='skip'){
+      $('paStatus').textContent=`檢查重複資料中…（${rows.length} 筆）`;
+      const existing=await existingIdSet('productAnalytics');
+      write=rows.filter(x=>!existing.has(x.id));skipped=rows.length-write.length;
+    }
+    await batchWrite('productAnalytics',write,x=>x.id,(done,total)=>{$('paStatus').textContent=`匯入商品分析中… ${done} / ${total}（${Math.round(done/Math.max(total,1)*100)}%）`});await logImport('productAnalytics','rakuten',file.name,rows.length,write.length,skipped);
     $('paStatus').textContent=`完成：彙整 ${rows.length} 筆、寫入 ${write.length}、跳過 ${skipped}`;$('paFile').value='';await loadProductAnalytics()
   }catch(e){console.error(e);$('paStatus').textContent='匯入失敗：'+e.message}}})}
 
@@ -197,7 +206,33 @@ function setupTableFilters(){
 }
 function compareCell(a='',b=''){const clean=v=>String(v).replace(/[¥￥円,%\s,]/g,'');const an=Number(clean(a)),bn=Number(clean(b));return Number.isFinite(an)&&Number.isFinite(bn)?an-bn:String(a).localeCompare(String(b),'zh-Hant',{numeric:true})}
 
-async function batchWrite(c,rows,id){for(let i=0;i<rows.length;i+=450){const b=writeBatch(db);rows.slice(i,i+450).forEach(x=>b.set(doc(db,c,id(x)),{...x,updatedAt:serverTimestamp()},{merge:true}));await b.commit()}}
+async function existingIdSet(collectionName){
+  const snap=await getDocs(collection(db,collectionName));
+  return new Set(snap.docs.map(d=>d.id));
+}
+function wait(ms){return new Promise(resolve=>setTimeout(resolve,ms))}
+async function commitWithRetry(batch,maxRetries=4){
+  let attempt=0;
+  while(true){
+    try{return await batch.commit()}
+    catch(e){
+      const retryable=/too many outstanding requests|resource-exhausted|unavailable|deadline-exceeded/i.test(String(e?.message||e));
+      if(!retryable||attempt>=maxRetries)throw e;
+      await wait(500*Math.pow(2,attempt));attempt++;
+    }
+  }
+}
+async function batchWrite(c,rows,id,onProgress){
+  const batchSize=400,total=rows.length;
+  if(!total){onProgress?.(0,0);return}
+  for(let i=0;i<total;i+=batchSize){
+    const b=writeBatch(db),part=rows.slice(i,i+batchSize);
+    part.forEach(x=>b.set(doc(db,c,id(x)),{...x,updatedAt:serverTimestamp()},{merge:true}));
+    await commitWithRetry(b);
+    onProgress?.(Math.min(i+part.length,total),total);
+    if(i+part.length<total)await wait(100);
+  }
+}
 async function logImport(type,platform,fileName,total,written,skipped){await setDoc(doc(collection(db,'imports')),{type,platform,fileName,total,written,skipped,importedBy:state.user.email||'',importedAt:serverTimestamp()})}
 async function loadHistory(){const s=await getDocs(query(collection(db,'imports'),orderBy('importedAt','desc'),limit(100)));$('historyRows').innerHTML=s.docs.map(d=>{const x=d.data();return`<tr><td>${x.importedAt?.toDate?x.importedAt.toDate().toLocaleString('zh-TW'):''}</td><td>${esc(x.type)}</td><td>${esc(x.platform)}</td><td>${esc(x.fileName)}</td><td>${fmt(x.total)}</td><td>${fmt(x.written)}</td><td>${fmt(x.skipped)}</td><td>${esc(x.importedBy)}</td></tr>`}).join('')}
 function chart(id,type,labels,datasets,extraOptions={}){state.charts[id]?.destroy();state.charts[id]=new Chart($(id),{type,data:{labels,datasets},options:{responsive:true,maintainAspectRatio:false,...extraOptions}})}
