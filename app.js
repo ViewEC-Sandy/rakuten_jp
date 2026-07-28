@@ -62,13 +62,22 @@ function parseCsvAutoHeader(file,headerCandidates){
   return new Promise((resolve,reject)=>{
     Papa.parse(file,{header:false,skipEmptyLines:'greedy',complete:r=>{
       try{
-        if(r.errors?.length)throw new Error(`CSV 解析錯誤：第 ${Number(r.errors[0].row||0)+1} 列 ${r.errors[0].message}`);
+        // 楽天のCSVには、商品名などに単独の引用符（"）が含まれ、
+        // Papa Parse が InvalidQuotes / MissingQuotes を警告する場合があります。
+        // 解析済みデータが返っている場合は処理を継続し、致命的なエラーだけ停止します。
+        const errors=r.errors||[];
+        const quoteErrors=errors.filter(e=>e.code==='InvalidQuotes'||e.code==='MissingQuotes'||/quote/i.test(String(e.message||'')));
+        const fatalErrors=errors.filter(e=>!quoteErrors.includes(e));
+        if(fatalErrors.length){
+          const e=fatalErrors[0];
+          throw new Error(`CSV 解析錯誤：第 ${Number(e.row||0)+1} 列 ${e.message}`);
+        }
         const rows=r.data||[],candidates=new Set(headerCandidates.map(normalizeHeader));
         let headerIndex=rows.findIndex(row=>row.some(cell=>candidates.has(normalizeHeader(cell))));
         if(headerIndex<0)headerIndex=0;
         const headers=(rows[headerIndex]||[]).map(normalizeHeader);
         const data=rows.slice(headerIndex+1).map(row=>rowToObject(headers,row)).filter(obj=>Object.values(obj).some(v=>String(v??'').trim()!==''));
-        resolve({data,headers,headerIndex,sourceRows:rows.length});
+        resolve({data,headers,headerIndex,sourceRows:rows.length,warningCount:quoteErrors.length});
       }catch(e){reject(e)}
     },error:reject});
   });
@@ -169,7 +178,7 @@ async function importProductAnalytics(file){
   $('paStatus').textContent='讀取中…';
   try{
     const r=await parseCsvAutoHeader(file,['商品番号','商品ID','商品管理番号（商品URL）','商品コード','アクセス人数','売上金額']);
-    $('paStatus').textContent=`讀取完成：自動辨識第 ${r.headerIndex+1} 列為表頭，整理資料中…`;
+    $('paStatus').textContent=`讀取完成：自動辨識第 ${r.headerIndex+1} 列為表頭${r.warningCount?`；已略過 ${r.warningCount} 個引號格式警告`:''}，整理資料中…`;
     const grouped=new Map();
     r.data.forEach((x,i)=>{
       const productId=pick(x,['商品番号','商品ID','商品管理番号（商品URL）','商品コード']);
@@ -187,7 +196,7 @@ async function importProductAnalytics(file){
       write=rows.filter(x=>!existing.has(x.id));skipped=rows.length-write.length;
     }
     await batchWrite('productAnalytics',write,x=>x.id,(done,total)=>{$('paStatus').textContent=`匯入商品分析中… ${done} / ${total}（${Math.round(done/Math.max(total,1)*100)}%）`});await logImport('productAnalytics','rakuten',file.name,rows.length,write.length,skipped);
-    $('paStatus').textContent=`完成：已自動將第 ${r.headerIndex+1} 列設為表頭；彙整 ${rows.length} 筆、寫入 ${write.length}、跳過 ${skipped}`;$('paFile').value='';await loadProductAnalytics()
+    $('paStatus').textContent=`完成：已自動將第 ${r.headerIndex+1} 列設為表頭${r.warningCount?`；已略過 ${r.warningCount} 個引號格式警告`:''}；彙整 ${rows.length} 筆、寫入 ${write.length}、跳過 ${skipped}`;$('paFile').value='';await loadProductAnalytics()
   }catch(e){console.error(e);$('paStatus').textContent='匯入失敗：'+e.message}
 }
 
