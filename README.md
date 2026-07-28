@@ -1,12 +1,18 @@
-# Japan EC Dashboard V9.2.4
+# Japan EC Dashboard V9.3
 
-以 V9.1 穩定版功能為基礎，補入：
+## 本版更新
 
-- Rakuten 銷售 CSV：ステータス = 900 自動排除
-- Shopify 銷售 CSV：Financial Status = refunded 自動排除
-- 商品分析頁及月份指定匯入
-- 商品分析與樂天廣告資料串接
-- 各資料表搜尋及排序
-- 已移除會造成瀏覽器卡死的 MutationObserver
+- 營運總覽新增商品頁流量、廣告費總計、廣告銷售額、ROAS、整體轉換率。
+- 營運總覽新增流量趨勢圖：商品頁流量、RPP 廣告流量、自然流量。
+- 營運總覽新增商品銷售排行（依營業額前 10 名）。
+- 平台名稱統一顯示為 `Rakuten`，既有 `rakuten` 與 `Rakuten` 資料會合併計算。
+- 專案分析不顯示空白／`未設定專案`。
+- 專案分析新增專案搜尋，以及篩選結果的營收、銷量、專案數總計。
+- 商品跨平台新增專案篩選，以及篩選結果的營收、銷量、結果筆數總計。
+- Overview 的廣告與流量資料改為依所選月份查詢，避免一次讀取整個 collection。
 
-部署時請保留你目前正常使用的 firebase-config.js。
+## 部署注意
+
+保留目前可正常登入的 `firebase-config.js`。更新其他檔案後，等待 GitHub Pages 部署完成，再以 `Ctrl + Shift + R` 強制重新整理。
+
+`Rakuten`／`rakuten` 會在畫面與統計上合併，但本版本不會自動刪除 Firestore 既有文件，以避免誤刪歷史資料。
