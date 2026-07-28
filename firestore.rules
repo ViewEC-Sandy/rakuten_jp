@@ -22,6 +22,10 @@ service cloud.firestore {
       allow read: if signedIn();
       allow write: if canEdit();
     }
+    match /ads/{id} {
+      allow read: if signedIn();
+      allow write: if canEdit();
+    }
     match /platforms/{id} {
       allow read: if signedIn();
       allow write: if canEdit();
