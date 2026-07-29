@@ -10,8 +10,8 @@ const isHiddenProject=value=>HIDE_PROJECTS.has(String(value||'').trim());
 const titles={overview:'營運總覽',platforms:'平台比較',products:'商品跨平台',groups:'專案分析',ads:'樂天廣告分析',productAnalysis:'商品分析',master:'商品主檔',import:'資料匯入',history:'匯入紀錄'};
 
 const salesImportProfiles={
-  rakuten:{orderId:['注文番号'],date:['注文日'],productId:['商品番号'],managementNumber:['商品管理番号'],quantity:['個数','数量'],unitPrice:['単価','商品単価'],revenue:['売上金額','金額'],coupon:['店舗発行クーポン利用額'],status:['ステータス'],cancelled:['900']},
-  shopify:{orderId:['Name'],date:['Paid at'],productId:['Lineitem sku'],managementNumber:['Variant SKU','商品管理番号'],quantity:['Lineitem quantity'],unitPrice:['Lineitem price'],revenue:['Total'],status:['Financial Status'],cancelled:['refunded']}
+  rakuten:{orderId:['注文番号'],date:['注文日'],productId:['商品番号'],managementNumber:['商品管理番号'],quantity:['個数','数量'],unitPrice:['単価','商品単価'],itemTotal:['商品合計金額'],shippingTotal:['送料合計'],coupon:['店舗発行クーポン利用額'],status:['ステータス'],cancelled:['900']},
+  shopify:{orderId:['Name'],date:['Created at'],productId:['Lineitem sku'],managementNumber:['Variant SKU','商品管理番号'],quantity:['Lineitem quantity'],unitPrice:['Lineitem price'],revenue:['Total'],status:['Financial Status'],cancelled:['refunded']}
 };
 
 document.querySelectorAll('[data-page]').forEach(b=>b.onclick=()=>show(b.dataset.page));
@@ -60,6 +60,17 @@ function renderCalendarHeatmap(){const root=$('calendarHeatmap');if(!root)return
 function csvEscape(v){const s=String(v??'');return /[",\n]/.test(s)?'"'+s.replaceAll('"','""')+'"':s}
 function normalizeHeader(v){return String(v??'').replace(/^\ufeff/,'').trim()}
 function rowToObject(headers,row){const out={};headers.forEach((h,i)=>{const key=normalizeHeader(h);if(key)out[key]=row[i]??''});return out}
+async function readCsvText(file){
+  const buffer=await file.arrayBuffer();
+  const utf8=new TextDecoder('utf-8',{fatal:false}).decode(buffer);
+  const bad=(utf8.match(/�/g)||[]).length;
+  if(!bad)return utf8.replace(/^﻿/,'');
+  try{
+    const sjis=new TextDecoder('shift_jis',{fatal:false}).decode(buffer);
+    const sjisBad=(sjis.match(/�/g)||[]).length;
+    return (sjisBad<bad?sjis:utf8).replace(/^﻿/,'');
+  }catch{return utf8.replace(/^﻿/,'')}
+}
 function parseCsvAutoHeader(file,headerCandidates){
   return new Promise((resolve,reject)=>{
     Papa.parse(file,{header:false,skipEmptyLines:'greedy',complete:r=>{
@@ -157,7 +168,7 @@ function exportCurrentPage(format){
 function exportOverviewCsv(){const rows=[['日期','平台','訂單編號','商品番号','數量','營收']];state.sales.slice().sort((a,b)=>{const da=a.saleDate?.toDate?a.saleDate.toDate():new Date(a.saleDate),db=b.saleDate?.toDate?b.saleDate.toDate():new Date(b.saleDate);return da-db}).forEach(r=>{const d=r.saleDate?.toDate?r.saleDate.toDate():new Date(r.saleDate);rows.push([fdLocal(d),r.platform,r.orderId,r.productId,r.quantity,r.revenue])});const blob=new Blob(['\ufeff'+rows.map(r=>r.map(csvEscape).join(',')).join('\n')],{type:'text/csv;charset=utf-8'}),url=URL.createObjectURL(blob),a=document.createElement('a');a.href=url;a.download=`dashboard_${$('start').value}_${$('end').value}.csv`;a.click();URL.revokeObjectURL(url)}
 function renderPlatforms(){const ks=[...new Set([...state.sales.map(x=>x.platform),...state.compare.map(x=>x.platform)])].filter(Boolean).sort();$('platformRows').innerHTML=ks.map(k=>{const a=summary(state.sales.filter(x=>x.platform===k)),b=summary(state.compare.filter(x=>x.platform===k)),g=growth(a.revenue,b.revenue);return`<tr><td>${esc(k)}</td><td>${yen(a.revenue)}</td><td>${yen(b.revenue)}</td><td>${yen(a.revenue-b.revenue)}</td><td class="${g.cls}">${g.text}</td><td>${fmt(a.quantity)}</td><td>${fmt(a.orders)}</td></tr>`}).join('')}
 function fillProductProjectFilter(){if(!$('productProjectFilter'))return;const current=$('productProjectFilter').value;const projects=[...new Set([...state.products.values()].map(p=>String(p.projectName||'').trim()).filter(v=>v&&!isHiddenProject(v)))].sort();$('productProjectFilter').innerHTML='<option value="">全部專案</option>'+projects.map(v=>`<option value="${esc(v)}">${esc(v)}</option>`).join('');$('productProjectFilter').value=current}
-function renderProducts(){const q=$('productSearch').value.toLowerCase(),projectFilter=$('productProjectFilter').value,m=new Map();state.sales.forEach(r=>{const platform=canonicalPlatform(r.platform),k=r.productId+'||'+platform;if(!m.has(k))m.set(k,{...r,platform,revenue:0,quantity:0,cmp:0});const x=m.get(k);x.revenue+=num(r.revenue);x.quantity+=num(r.quantity)});state.compare.forEach(r=>{const platform=canonicalPlatform(r.platform),k=r.productId+'||'+platform;if(!m.has(k))m.set(k,{...r,platform,revenue:0,quantity:0,cmp:0});m.get(k).cmp+=num(r.revenue)});const rows=[...m.values()].filter(x=>{const p=findProduct(x.productId)||{},project=String(p.projectName||'').trim();return!isHiddenProject(project)&&(!projectFilter||project===projectFilter)&&(!q||(x.productId+' '+(p.managementNumber||'')+' '+(p.nameZh||'')+' '+(p.nameJa||'')+' '+project).toLowerCase().includes(q))}).sort((a,b)=>b.revenue-a.revenue);const totals={revenue:sum(rows.map(x=>x.revenue)),quantity:sum(rows.map(x=>x.quantity))};$('productTotals').innerHTML=[['篩選營收總計',yen(totals.revenue)],['篩選銷量總計',fmt(totals.quantity)],['結果筆數',fmt(rows.length)]].map(([n,v])=>`<div class="kpi"><span>${n}</span><strong>${v}</strong></div>`).join('');$('productRows').innerHTML=rows.slice(0,500).map(x=>{const p=findProduct(x.productId)||{},g=growth(x.revenue,x.cmp);return`<tr><td>${esc(x.productId)}</td><td>${esc(p.managementNumber)}</td><td>${esc(p.nameZh||p.name||'未設定')}</td><td>${esc(p.nameJa||'')}</td><td>${esc(x.platform)}</td><td>${yen(x.revenue)}</td><td>${yen(x.cmp)}</td><td class="${g.cls}">${g.text}</td><td>${fmt(x.quantity)}</td></tr>`}).join('')}
+function renderProducts(){const q=$('productSearch').value.toLowerCase(),projectFilter=$('productProjectFilter').value,m=new Map();state.sales.forEach(r=>{const platform=canonicalPlatform(r.platform),ref=resolveProductReference(r.productId)||{},keyProduct=ref.product?.id||r.productId,k=keyProduct+'||'+platform;if(!m.has(k))m.set(k,{...r,productId:keyProduct,platform,revenue:0,quantity:0,cmp:0});const x=m.get(k);x.revenue+=num(r.revenue);x.quantity+=num(r.quantity)});state.compare.forEach(r=>{const platform=canonicalPlatform(r.platform),ref=resolveProductReference(r.productId)||{},keyProduct=ref.product?.id||r.productId,k=keyProduct+'||'+platform;if(!m.has(k))m.set(k,{...r,productId:keyProduct,platform,revenue:0,quantity:0,cmp:0});m.get(k).cmp+=num(r.revenue)});const rows=[...m.values()].filter(x=>{const ref=resolveProductReference(x.productId),p=ref.product||{},project=String(ref.projectName||p.projectName||'').trim();return!isHiddenProject(project)&&(!projectFilter||project===projectFilter)&&(!q||(x.productId+' '+(ref.managementNumber||p.managementNumber||'')+' '+(ref.nameZh||p.nameZh||'')+' '+(p.nameJa||'')+' '+project).toLowerCase().includes(q))}).sort((a,b)=>b.revenue-a.revenue);const totals={revenue:sum(rows.map(x=>x.revenue)),quantity:sum(rows.map(x=>x.quantity))};$('productTotals').innerHTML=[['篩選營收總計',yen(totals.revenue)],['篩選銷量總計',fmt(totals.quantity)],['結果筆數',fmt(rows.length)]].map(([n,v])=>`<div class="kpi"><span>${n}</span><strong>${v}</strong></div>`).join('');$('productRows').innerHTML=rows.slice(0,500).map(x=>{const ref=resolveProductReference(x.productId),p=ref.product||{},g=growth(x.revenue,x.cmp);return`<tr><td>${esc(x.productId)}</td><td>${esc(ref.managementNumber||p.managementNumber||'')}</td><td>${esc(ref.nameZh||p.nameZh||p.name||'未設定')}</td><td>${esc(p.nameJa||'')}</td><td>${esc(x.platform)}</td><td>${yen(x.revenue)}</td><td>${yen(x.cmp)}</td><td class="${g.cls}">${g.text}</td><td>${fmt(x.quantity)}</td></tr>`}).join('')}
 function renderGroups(){const q=$('groupSearch').value.trim().toLowerCase(),m=new Map();state.sales.forEach(r=>{const k=String(findProduct(r.productId)?.projectName||'').trim();if(!k||isHiddenProject(k))return;if(!m.has(k))m.set(k,{rev:0,cmp:0,qty:0});const x=m.get(k);x.rev+=num(r.revenue);x.qty+=num(r.quantity)});state.compare.forEach(r=>{const k=String(findProduct(r.productId)?.projectName||'').trim();if(!k||isHiddenProject(k))return;if(!m.has(k))m.set(k,{rev:0,cmp:0,qty:0});m.get(k).cmp+=num(r.revenue)});const rows=[...m.entries()].filter(([k])=>!q||k.toLowerCase().includes(q)).sort((a,b)=>b[1].rev-a[1].rev),total=sum(rows.map(([,x])=>x.rev)),qty=sum(rows.map(([,x])=>x.qty));$('groupTotals').innerHTML=[['篩選營收總計',yen(total)],['篩選銷量總計',fmt(qty)],['專案數',fmt(rows.length)]].map(([n,v])=>`<div class="kpi"><span>${n}</span><strong>${v}</strong></div>`).join('');$('groupRows').innerHTML=rows.map(([k,x])=>{const g=growth(x.rev,x.cmp);return`<tr><td>${esc(k)}</td><td>${yen(x.rev)}</td><td>${yen(x.cmp)}</td><td>${yen(x.rev-x.cmp)}</td><td class="${g.cls}">${g.text}</td><td>${fmt(x.qty)}</td><td>${total?(x.rev/total*100).toFixed(1):0}%</td></tr>`}).join('')}
 
 function renderMaster(){const q=$('masterSearch').value.trim().toLowerCase();$('masterRows').innerHTML=[...state.products.values()].filter(p=>!q||((p.id||'')+' '+(p.managementNumber||'')+' '+(p.nameZh||'')+' '+(p.nameJa||'')+' '+(p.projectName||'')+' '+(p.vendorName||'')+' '+(p.barcode||'')).toLowerCase().includes(q)).sort((a,b)=>String(a.id).localeCompare(String(b.id),'ja')).map(p=>`<tr><td>${esc(p.id)}</td><td>${esc(p.managementNumber)}</td><td>${esc(p.nameZh||p.name)}</td><td>${esc(p.nameJa)}</td><td>${esc(p.projectName)}</td><td>${esc(p.vendorName)}</td><td>${twd(p.supplyPrice)}</td><td>${yen(p.rakutenPriceJpy)}</td><td>${yen(p.netseaPriceJpy)}</td><td>${yen(p.shopifyPrice)}</td><td>${esc(p.barcode)}</td></tr>`).join('')}
@@ -171,70 +182,65 @@ async function importSales(file){
   const p=$('importPlatform').value,profile=salesImportProfiles[p];
   if(!profile)return $('salesStatus').textContent='請先選擇平台';
   $('salesStatus').textContent='讀取中…';
-  Papa.parse(file,{header:true,skipEmptyLines:'greedy',complete:async r=>{try{
-    if(r.errors?.length)throw new Error(`CSV 解析錯誤：第 ${r.errors[0].row+2} 列 ${r.errors[0].message}`);
-    let cancelled=0;
-    const rows=r.data.map((x,i)=>{
-      const status=pick(x,profile.status||[]).toLowerCase();
-      if((profile.cancelled||[]).some(v=>status===String(v).toLowerCase())){cancelled++;return null}
-      const date=pick(x,profile.date),orderId=pick(x,profile.orderId),productId=pick(x,profile.productId),managementNumber=pick(x,profile.managementNumber),line=String(i+1);
-      if(!date||!orderId||!productId)return null;
-      const d=parseDate(date),quantity=num(pick(x,profile.quantity)),unitPrice=num(pick(x,profile.unitPrice)),directRevenue=pick(x,profile.revenue),grossRevenue=directRevenue?num(directRevenue):unitPrice*quantity,couponAmount=p==='rakuten'?num(pick(x,profile.coupon||[])):0,revenue=grossRevenue-couponAmount;
-      return{id:safe(p+'_'+orderId+'_'+productId+'_'+line),platform:canonicalPlatform(p),orderId,productId,managementNumber,quantity,unitPrice,grossRevenue,couponAmount,revenue,saleDate:Timestamp.fromDate(d),year:d.getFullYear(),month:monthFromDate(d),sourceFile:file.name,updatedAt:serverTimestamp()}
-    }).filter(Boolean);
-    let write=rows,skipped=0;
-    if($('duplicate').value==='skip'){
-      $('salesStatus').textContent=`檢查重複資料中…（${rows.length} 筆）`;
-      const existing=await existingIdSet('sales');
-      write=rows.filter(x=>!existing.has(x.id));skipped=rows.length-write.length;
-    }
-    await batchWrite('sales',write,x=>x.id,(done,total)=>{$('salesStatus').textContent=`匯入銷售資料中… ${done} / ${total}（${Math.round(done/Math.max(total,1)*100)}%）`});const platformName=canonicalPlatform(p);await setDoc(doc(db,'platforms',platformName),{name:platformName,updatedAt:serverTimestamp()},{merge:true});await logImport('sales',p,file.name,r.data.length,write.length,skipped+cancelled);
-    $('salesStatus').textContent=`完成：有效 ${rows.length}、寫入 ${write.length}、重複跳過 ${skipped}、取消／退款排除 ${cancelled}`;await loadPlatforms();await loadReports()
-  }catch(e){console.error(e);$('salesStatus').textContent='匯入失敗：'+e.message}}})}
+  try{
+    const source=p==='rakuten'?await readCsvText(file):file;
+    Papa.parse(source,{header:true,skipEmptyLines:'greedy',complete:async r=>{try{
+      const fatal=(r.errors||[]).find(e=>!['InvalidQuotes','MissingQuotes'].includes(e.code)&&!/quote/i.test(String(e.message||'')));
+      if(fatal)throw new Error(`CSV 解析錯誤：第 ${fatal.row+2} 列 ${fatal.message}`);
+      let cancelled=0;const countedOrders=new Set();
+      const rows=r.data.map((x,i)=>{
+        const status=pick(x,profile.status||[]).toLowerCase();
+        if((profile.cancelled||[]).some(v=>status===String(v).toLowerCase())){cancelled++;return null}
+        const date=pick(x,profile.date),orderId=pick(x,profile.orderId),productId=pick(x,profile.productId),managementNumber=pick(x,profile.managementNumber),line=String(i+1);
+        if(!date||!orderId||!productId)return null;
+        const d=parseDate(date),quantity=num(pick(x,profile.quantity)),unitPrice=num(pick(x,profile.unitPrice));
+        let grossRevenue=0,couponAmount=0,revenue=0;
+        if(p==='rakuten'){
+          const firstOrderRow=!countedOrders.has(orderId);countedOrders.add(orderId);
+          const itemTotal=num(pick(x,profile.itemTotal||[])),shippingTotal=num(pick(x,profile.shippingTotal||[]));
+          couponAmount=num(pick(x,profile.coupon||[]));
+          grossRevenue=firstOrderRow?itemTotal+shippingTotal:0;
+          revenue=firstOrderRow?grossRevenue-couponAmount:0;
+        }else{
+          const directRevenue=pick(x,profile.revenue),value=directRevenue?num(directRevenue):unitPrice*quantity;
+          grossRevenue=value;revenue=value;
+        }
+        return{id:safe(p+'_'+orderId+'_'+productId+'_'+line),platform:canonicalPlatform(p),orderId,productId,managementNumber,quantity,unitPrice,grossRevenue,couponAmount,revenue,saleDate:Timestamp.fromDate(d),year:d.getFullYear(),month:monthFromDate(d),sourceFile:file.name,updatedAt:serverTimestamp()}
+      }).filter(Boolean);
+      let write=rows,skipped=0;
+      if($('duplicate').value==='skip'){$('salesStatus').textContent=`檢查重複資料中…（${rows.length} 筆）`;const existing=await existingIdSet('sales');write=rows.filter(x=>!existing.has(x.id));skipped=rows.length-write.length}
+      await batchWrite('sales',write,x=>x.id,(done,total)=>{$('salesStatus').textContent=`匯入銷售資料中… ${done} / ${total}（${Math.round(done/Math.max(total,1)*100)}%）`});const platformName=canonicalPlatform(p);await setDoc(doc(db,'platforms',platformName),{name:platformName,updatedAt:serverTimestamp()},{merge:true});await logImport('sales',p,file.name,r.data.length,write.length,skipped+cancelled);
+      $('salesStatus').textContent=`完成：有效 ${rows.length}、寫入 ${write.length}、重複跳過 ${skipped}、取消／退款排除 ${cancelled}`;await loadPlatforms();await loadReports()
+    }catch(e){console.error(e);$('salesStatus').textContent='匯入失敗：'+e.message}}})
+  }catch(e){console.error(e);$('salesStatus').textContent='匯入失敗：'+e.message}
+}
 
 
 $('adFile').onchange=e=>e.target.files?.[0]&&importAds(e.target.files[0]);
 async function importAds(file){
   $('adStatus').textContent='讀取中…';
-  Papa.parse(file,{header:true,skipEmptyLines:'greedy',complete:async r=>{
-    try{
-      if(r.errors?.length)throw new Error(`CSV 解析錯誤：第 ${r.errors[0].row+2} 列 ${r.errors[0].message}`);
-      const grouped=new Map();
-      r.data.forEach((x,i)=>{
-        const rowNo=i+2,dateText=pick(x,['日付']),managementNumber=pick(x,['商品管理番号']);
-        if(!dateText&&!managementNumber)return;
-        if(!dateText)throw new Error(`第 ${rowNo} 列缺少「日付」`);
-        if(!managementNumber)throw new Error(`第 ${rowNo} 列缺少「商品管理番号」`);
-        let d;
-        try{d=parseRakutenAdDate(dateText)}catch(e){throw new Error(`第 ${rowNo} 列：${e.message}`)}
-        const monthKey=monthFromDate(d),key=monthKey+'||'+managementNumber;
-        const clicks=num(pick(x,['クリック数(合計)','クリック数']));
-        const adSpend=num(pick(x,['実績額(合計)','実績額']));
-        const salesAmount=num(pick(x,['売上金額(合計720時間)','売上金額(720時間)','売上金額']));
-        const salesOrders=num(pick(x,['売上件数(合計720時間)','売上件数(720時間)','売上件数']));
-        const ctr=num(pick(x,['CTR(%)','CTR']));
-        if(!grouped.has(key))grouped.set(key,{month:monthKey,adDate:d,managementNumber,clicks:0,adSpend:0,salesAmount:0,salesOrders:0,ctrWeighted:0,ctrWeight:0});
-        const g=grouped.get(key),weight=Math.max(clicks,1);
-        g.clicks+=clicks;g.adSpend+=adSpend;g.salesAmount+=salesAmount;g.salesOrders+=salesOrders;g.ctrWeighted+=ctr*weight;g.ctrWeight+=weight;
-      });
-      const rows=[...grouped.values()].map(g=>{
-        const product=findProductByManagementNumber(g.managementNumber),ctr=g.ctrWeight?g.ctrWeighted/g.ctrWeight:0;
-        return{id:safe('rakuten_ads_'+g.month+'_'+g.managementNumber),platform:'rakuten',adDate:Timestamp.fromDate(g.adDate),month:g.month,managementNumber:g.managementNumber,productId:product?.id||'',ctr,clicks:g.clicks,adSpend:g.adSpend,salesAmount:g.salesAmount,salesOrders:g.salesOrders,cvr:g.clicks?g.salesOrders/g.clicks*100:0,roas:g.adSpend?g.salesAmount/g.adSpend*100:0,sourceFile:file.name};
-      });
-      if(!rows.length)throw new Error('CSV 中找不到可匯入的廣告資料');
-      let write=rows,skipped=0;
-      if($('adDuplicate').value==='skip'){
-        $('adStatus').textContent=`檢查重複資料中…（${rows.length} 筆）`;
-        const existing=await existingIdSet('ads');
-        write=rows.filter(x=>!existing.has(x.id));skipped=rows.length-write.length;
-      }
-      await batchWrite('ads',write,x=>x.id,(done,total)=>{$('adStatus').textContent=`匯入樂天廣告中… ${done} / ${total}（${Math.round(done/Math.max(total,1)*100)}%）`});
-      await logImport('rakutenAds','rakuten',file.name,rows.length,write.length,skipped);
-      const unmatched=rows.filter(x=>!x.productId).length;
-      $('adStatus').textContent=`完成：彙整 ${rows.length} 筆、寫入 ${write.length}、跳過 ${skipped}${unmatched?`、未對應商品 ${unmatched} 筆`:''}`;
-      $('adFile').value='';await loadAds();
-    }catch(e){console.error(e);$('adStatus').textContent='匯入失敗：'+e.message}
-  }});
+  try{
+    const text=await readCsvText(file);
+    const r=await parseCsvAutoHeader(text,['日付','商品管理番号','CTR(%)','クリック数(合計)','実績額(合計)']);
+    if(r.headerIndex!==7)console.info(`樂天廣告表頭自動辨識於第 ${r.headerIndex+1} 列`);
+    const grouped=new Map();
+    r.data.forEach((x,i)=>{
+      const rowNo=r.headerIndex+i+2,dateText=pick(x,['日付']),managementNumber=pick(x,['商品管理番号']);
+      if(!dateText&&!managementNumber)return;
+      if(!dateText)throw new Error(`第 ${rowNo} 列缺少「日付」`);
+      if(!managementNumber)throw new Error(`第 ${rowNo} 列缺少「商品管理番号」`);
+      let d;try{d=parseRakutenAdDate(dateText)}catch(e){throw new Error(`第 ${rowNo} 列：${e.message}`)}
+      const monthKey=monthFromDate(d),key=monthKey+'||'+managementNumber;
+      const clicks=num(pick(x,['クリック数(合計)','クリック数'])),adSpend=num(pick(x,['実績額(合計)','実績額'])),salesAmount=num(pick(x,['売上金額(合計720時間)','売上金額(720時間)','売上金額'])),salesOrders=num(pick(x,['売上件数(合計720時間)','売上件数(720時間)','売上件数'])),ctr=num(pick(x,['CTR(%)','CTR']));
+      if(!grouped.has(key))grouped.set(key,{month:monthKey,adDate:d,managementNumber,clicks:0,adSpend:0,salesAmount:0,salesOrders:0,ctrWeighted:0,ctrWeight:0});
+      const g=grouped.get(key),weight=Math.max(clicks,1);g.clicks+=clicks;g.adSpend+=adSpend;g.salesAmount+=salesAmount;g.salesOrders+=salesOrders;g.ctrWeighted+=ctr*weight;g.ctrWeight+=weight;
+    });
+    const rows=[...grouped.values()].map(g=>{const product=findProductByManagementNumber(g.managementNumber),ctr=g.ctrWeight?g.ctrWeighted/g.ctrWeight:0;return{id:safe('rakuten_ads_'+g.month+'_'+g.managementNumber),platform:'rakuten',adDate:Timestamp.fromDate(g.adDate),month:g.month,managementNumber:g.managementNumber,productId:product?.id||'',ctr,clicks:g.clicks,adSpend:g.adSpend,salesAmount:g.salesAmount,salesOrders:g.salesOrders,cvr:g.clicks?g.salesOrders/g.clicks*100:0,roas:g.adSpend?g.salesAmount/g.adSpend*100:0,sourceFile:file.name}});
+    if(!rows.length)throw new Error('CSV 中找不到可匯入的廣告資料');
+    let write=rows,skipped=0;if($('adDuplicate').value==='skip'){$('adStatus').textContent=`檢查重複資料中…（${rows.length} 筆）`;const existing=await existingIdSet('ads');write=rows.filter(x=>!existing.has(x.id));skipped=rows.length-write.length}
+    await batchWrite('ads',write,x=>x.id,(done,total)=>{$('adStatus').textContent=`匯入樂天廣告中… ${done} / ${total}（${Math.round(done/Math.max(total,1)*100)}%）`});await logImport('rakutenAds','rakuten',file.name,rows.length,write.length,skipped);
+    const unmatched=rows.filter(x=>!x.productId).length;$('adStatus').textContent=`完成：表頭第 ${r.headerIndex+1} 列、彙整 ${rows.length} 筆、寫入 ${write.length}、跳過 ${skipped}${r.warningCount?`、略過 ${r.warningCount} 個引號警告`:''}${unmatched?`、未對應商品 ${unmatched} 筆`:''}`;$('adFile').value='';await loadAds();
+  }catch(e){console.error(e);$('adStatus').textContent='匯入失敗：'+e.message}
 }
 
 async function loadAds(){const s=await getDocs(collection(db,'ads'));state.ads=s.docs.map(d=>({id:d.id,...d.data()}));state.adsLoaded=true;fillAdMonthFilter();renderAds()}
