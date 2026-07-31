@@ -1,3 +1,10 @@
+
+function truncateProductName(name){
+  if(!name) return '';
+  const s=String(name);
+  return s.length>15 ? s.substring(0,15)+'...' : s;
+}
+
 import {firebaseConfig} from './firebase-config.js';
 import {initializeApp} from 'https://www.gstatic.com/firebasejs/10.12.4/firebase-app.js';
 import {getAuth,onAuthStateChanged,signInWithEmailAndPassword,sendPasswordResetEmail,signOut} from 'https://www.gstatic.com/firebasejs/10.12.4/firebase-auth.js';
