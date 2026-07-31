@@ -7,3 +7,7 @@
 .table thead th{position:sticky;top:0;z-index:3;background:#f8fafc;box-shadow:0 1px 0 #e5e7eb}
 
 .maintenance-checks{display:grid;grid-template-columns:repeat(3,minmax(160px,1fr));gap:12px;margin:16px 0}.maintenance-checks label{padding:12px;border:1px solid #e2e8f0;border-radius:10px}.danger-zone{border-color:#f0b4ae;background:#fff8f7}.maintenance-result{margin-top:16px;padding:14px;background:#f8fafc;border-radius:10px}.health-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}@media(max-width:700px){.maintenance-checks,.health-grid{grid-template-columns:1fr}}
+
+/* V11.3: compact product names in analysis and sales ranking */
+.product-name-short{display:inline-block;max-width:15em;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;vertical-align:bottom;cursor:help}
+#paRows td:nth-child(4),#topProductRows td:nth-child(3){max-width:15em}
