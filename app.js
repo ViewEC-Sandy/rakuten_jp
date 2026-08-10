@@ -102,9 +102,10 @@ function updatePaProgress(percent,text){
 }
 function resetPaProgress(){
   const wrap=$('paProgressWrap');
-  if(wrap)wrap.classList.add('hidden');
+  if(wrap)wrap.classList.remove('hidden');
   if($('paProgressBar'))$('paProgressBar').style.width='0%';
   if($('paProgressPercent'))$('paProgressPercent').textContent='0%';
+  if($('paProgressText'))$('paProgressText').textContent='等待選擇商品分析 CSV';
 }
 function japaneseTextScore(text){
   const s=String(text||'');
@@ -351,6 +352,7 @@ async function importSales(file){
 
 
 $('adFile').onchange=e=>e.target.files?.[0]&&importAds(e.target.files[0]);
+$('paFile').onchange=e=>{const file=e.target.files?.[0];if(file)importProductAnalytics(file)};
 async function importAds(file){
   $('adStatus').textContent='讀取中…';
   try{
