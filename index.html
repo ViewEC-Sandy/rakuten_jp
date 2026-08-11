@@ -1,7 +1,7 @@
 <!doctype html><html lang="zh-Hant"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Japan EC Dashboard Enterprise V11</title><link rel="stylesheet" href="style.css"><script src="https://cdn.jsdelivr.net/npm/papaparse@5.4.1/papaparse.min.js"></script><script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.3/dist/chart.umd.min.js"></script><script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script></head><body>
 <div id="loading">載入中…</div>
 <section id="login" class="hidden card login"><h1>Japan EC Dashboard Enterprise V11</h1><p>Firebase 多平台分析版</p><input id="email" type="email" placeholder="Email"><input id="password" type="password" placeholder="Password"><button id="loginBtn">登入</button><button id="resetBtn" class="ghost">忘記密碼</button><p id="loginMsg"></p></section>
-<div id="app" class="hidden layout"><aside><h2>Japan EC Dashboard</h2><small>V11.4.3 Product Analytics Import</small><nav><button data-page="overview" class="active">營運總覽</button><button data-page="platforms">平台比較</button><button data-page="products">商品跨平台</button><button data-page="groups">專案分析</button><button data-page="ads">樂天廣告分析</button><button data-page="productAnalysis">商品分析</button><button data-page="master">商品主檔</button><button data-page="import" class="editor">資料匯入</button><button data-page="history">匯入紀錄</button><button data-page="maintenance" class="editor">系統維護</button></nav><div class="user"><span id="userText"></span><span id="roleText"></span><button id="logoutBtn" class="danger">登出</button></div></aside>
+<div id="app" class="hidden layout"><aside><h2>Japan EC Dashboard</h2><small>V11.6 Profit Structure Analysis</small><nav><button data-page="overview" class="active">營運總覽</button><button data-page="platforms">平台比較</button><button data-page="profitability">收益結構分析</button><button data-page="products">商品跨平台</button><button data-page="groups">專案分析</button><button data-page="ads">樂天廣告分析</button><button data-page="productAnalysis">商品分析</button><button data-page="master">商品主檔</button><button data-page="import" class="editor">資料匯入</button><button data-page="history">匯入紀錄</button><button data-page="maintenance" class="editor">系統維護</button></nav><div class="user"><span id="userText"></span><span id="roleText"></span><button id="logoutBtn" class="danger">登出</button></div></aside>
 <main><header><div><small>TAIWAN PAVILION / MULTI-PLATFORM</small><h1 id="title">營運總覽</h1></div><div class="header-actions"><button id="exportCsvBtn" class="ghost">匯出本頁 CSV</button><button id="exportExcelBtn" class="ghost">匯出本頁 Excel</button><button id="printBtn" class="ghost">列印／PDF</button><button id="refreshBtn">重新整理</button></div></header>
 <div id="viewerNotice" class="notice hidden">目前為 Viewer，只能查詢。請將 Firestore 的 users/{UID}/role 改為 manager 或 admin。</div>
 <div class="filters"><label>平台<select id="platform"><option value="">全部平台</option></select></label><label>開始日期<input id="start" type="date"></label><label>結束日期<input id="end" type="date"></label><label>比較<select id="compare"><option value="yoy">去年同期</option><option value="previous">前一期間</option><option value="none">不比較</option></select></label><label>圖表粒度<select id="granularity"><option value="month">月</option><option value="quarter">季</option><option value="year">年</option></select></label><button id="applyBtn">套用</button></div>
@@ -13,12 +13,79 @@
 <div class="grid2"><div class="card"><h3>專案營收排行</h3><canvas id="projectRanking"></canvas></div><div class="card"><h3>每日營收熱力圖</h3><div id="calendarHeatmap" class="calendar-heatmap"></div></div></div>
 </section>
 <section id="platforms" class="page"><div class="card"><h3>各平台銷售比較</h3><div class="table"><table><thead><tr><th>平台</th><th>本期營收</th><th>比較期</th><th>差額</th><th>成長率</th><th>銷量</th><th>訂單數</th></tr></thead><tbody id="platformRows"></tbody></table></div></div></section>
+<section id="profitability" class="page">
+<div class="profit-toolbar card">
+  <div class="subfilters profit-params">
+    <label>年分<input id="profitYear" type="number" min="2000" max="2100" step="1"></label>
+    <label>平台<input id="profitPlatform" placeholder="例如 Rakuten"></label>
+    <label>匯率（1 JPY = TWD）<input id="profitFx" type="number" min="0" step="0.0001" placeholder="例如 0.2150"></label>
+    <label>平台銷售（JPY）<input id="profitSalesJpy" type="number" min="0" step="1" placeholder="0"></label>
+  </div>
+  <div class="profit-actions editor">
+    <button id="profitLoadBtn" class="ghost">讀取此年分／平台</button>
+    <button id="profitSaveBtn">儲存目前資料</button>
+    <button id="profitClearBtn" class="ghost">清空輸入</button>
+    <span id="profitStatus" class="muted"></span>
+  </div>
+</div>
+
+<div id="profitKpis" class="kpis profit-kpis"></div>
+
+<div class="grid2 profit-grid">
+  <div class="card">
+    <h3>日幣成本（JPY）</h3>
+    <p class="muted">以下費用以日幣輸入，系統會依上方匯率換算為台幣後納入總成本。</p>
+    <div class="profit-form-grid">
+      <label>平台抽成（JPY）<input id="profitPlatformFeeJpy" class="profit-calc-input" type="number" min="0" step="1" placeholder="0"></label>
+      <label>クーポン値引額（店舗）（JPY）<input id="profitCouponJpy" class="profit-calc-input" type="number" min="0" step="1" placeholder="0"></label>
+      <label>平台營運成本（JPY）<input id="profitOperationJpy" class="profit-calc-input" type="number" min="0" step="1" placeholder="0"></label>
+    </div>
+    <div class="profit-summary-line"><span>日幣固定成本小計</span><strong id="profitFixedJpySubtotal">¥0</strong></div>
+    <div class="profit-summary-line"><span>換算台幣</span><strong id="profitFixedJpyTwd">NT$0</strong></div>
+  </div>
+
+  <div class="card">
+    <h3>台幣成本（TWD）</h3>
+    <p class="muted">廠商款項、運費與倉儲直接以台幣計入損益。</p>
+    <div class="profit-form-grid">
+      <label>運費（TWD）<input id="profitShippingTwd" class="profit-calc-input" type="number" min="0" step="1" placeholder="0"></label>
+      <label>倉儲（TWD）<input id="profitWarehouseTwd" class="profit-calc-input" type="number" min="0" step="1" placeholder="0"></label>
+    </div>
+    <div class="profit-summary-line"><span>台幣直接成本小計（含廠商款項）</span><strong id="profitNativeTwdSubtotal">NT$0</strong></div>
+  </div>
+</div>
+
+<div class="card">
+  <div class="profit-section-head"><div><h3>廠商款項明細（TWD）</h3><p class="muted">可依不同專案自由新增、刪除與輸入金額。</p></div><button id="addVendorRowBtn" class="ghost editor">＋新增專案</button></div>
+  <div class="table profit-table"><table data-no-auto-filter="1"><thead><tr><th>專案名稱</th><th>廠商款項（TWD）</th><th>備註</th><th class="editor">操作</th></tr></thead><tbody id="vendorCostRows"></tbody><tfoot><tr><th>廠商款項合計</th><th id="vendorCostTotal">NT$0</th><th></th><th class="editor"></th></tr></tfoot></table></div>
+</div>
+
+<div class="card">
+  <div class="profit-section-head"><div><h3>廣告費明細（JPY）</h3><p class="muted">廣告名稱、廣告費與廣告銷售額皆可自由輸入；各細項與整體 ROAS 自動計算。</p></div><button id="addAdCostRowBtn" class="ghost editor">＋新增廣告項目</button></div>
+  <div class="table profit-table"><table data-no-auto-filter="1"><thead><tr><th>廣告項目</th><th>廣告費（JPY）</th><th>廣告銷售額（JPY）</th><th>ROAS</th><th>備註</th><th class="editor">操作</th></tr></thead><tbody id="profitAdRows"></tbody><tfoot><tr><th>廣告合計</th><th id="profitAdSpendTotal">¥0</th><th id="profitAdSalesTotal">¥0</th><th id="profitAdRoasTotal">0%</th><th></th><th class="editor"></th></tr></tfoot></table></div>
+</div>
+
+<div class="card">
+  <h3>損益結構</h3>
+  <div class="table profit-breakdown"><table data-no-auto-filter="1"><thead><tr><th>項目</th><th>原始幣別</th><th>原始金額</th><th>台幣金額</th><th>占平台銷售比</th></tr></thead><tbody id="profitBreakdownRows"></tbody></table></div>
+  <p class="muted">TAcoS＝總廣告費 ÷ 平台銷售；ROAS＝總廣告銷售額 ÷ 總廣告費。最終總成本與利潤統一以 TWD 計算。</p>
+</div>
+</section>
 <section id="products" class="page"><div id="productTotals" class="kpis summary-kpis"></div><div class="card"><h3>商品跨平台分析</h3><div class="subfilters"><label>專案<select id="productProjectFilter"><option value="">全部專案</option></select></label><label>搜尋<input id="productSearch" placeholder="商品番号（SKU）、商品管理番号（商品編號）、中文商品名"></label></div><div class="table"><table data-no-auto-filter="1"><thead><tr><th>商品番号（SKU）</th><th>商品管理番号（商品編號）</th><th>中文商品名</th><th>平台</th><th>本期營收</th><th>比較期</th><th>成長率</th><th>銷量</th></tr></thead><tbody id="productRows"></tbody></table></div></div></section>
 <section id="groups" class="page"><div id="groupTotals" class="kpis summary-kpis"></div><div class="card"><h3>專案分析</h3><div class="subfilters"><label>搜尋專案<input id="groupSearch" placeholder="輸入專案名稱"></label></div><div class="table"><table data-no-auto-filter="1"><thead><tr><th>專案名稱</th><th>本期營收</th><th>比較期</th><th>差額</th><th>成長率</th><th>銷量</th><th>占比</th></tr></thead><tbody id="groupRows"></tbody></table></div></div></section>
 <section id="ads" class="page"><div id="adKpis" class="kpis"></div><div class="card"><h3>樂天廣告成效</h3><div class="subfilters"><label>開始月份<input id="adMonthStart" type="month"></label><label>結束月份<input id="adMonthEnd" type="month"></label><label>專案<select id="adProjectFilter"><option value="">全部專案</option></select></label><label>搜尋<input id="adSearch" placeholder="商品番号（SKU）、商品管理番号（商品編號）、商品名"></label><label>排序欄位<select id="adSort"><option value="adSpend">廣告花費</option><option value="salesAmount">銷售額</option><option value="clicks">點擊數</option><option value="salesOrders">銷售訂單數</option><option value="ctr">CTR</option><option value="cvr">CVR</option><option value="roas">ROAS</option><option value="month">月份</option></select></label><label>順序<select id="adOrder"><option value="desc">由大到小</option><option value="asc">由小到大</option></select></label></div><div class="table"><table><thead><tr><th>月份</th><th>商品番号（SKU）</th><th>商品管理番号（商品編號）</th><th>中文商品名</th><th>專案</th><th>CTR</th><th>點擊數</th><th>廣告花費</th><th>廣告銷售額</th><th>銷售訂單數</th><th>CVR</th><th>ROAS</th></tr></thead><tbody id="adRows"></tbody></table></div><p class="muted">CVR＝銷售訂單數 ÷ 點擊數 × 100%；ROAS＝銷售額 ÷ 廣告花費 × 100%。彙總 CTR 以點擊數加權平均顯示。</p></div></section>
 
 <section id="productAnalysis" class="page"><div id="paKpis" class="kpis"></div><div class="card"><h3>商品分析</h3><div class="subfilters"><label>開始月份<input id="paMonthStart" type="month"></label><label>結束月份<input id="paMonthEnd" type="month"></label><label>專案<select id="paProjectFilter"><option value="">全部專案</option></select></label><label>搜尋<input id="paSearch" placeholder="商品番号（SKU）、商品管理番号（商品編號）、商品名"></label><label>排序欄位<select id="paSort"><option value="sales">銷售額</option><option value="salesOrders">銷售訂單數</option><option value="salesQuantity">銷售商品數</option><option value="traffic">商品頁流量</option><option value="rppTraffic">RPP廣告流量</option><option value="organicTraffic">自然流量</option><option value="conversionRate">轉換率</option><option value="newOrders">新客訂單數</option><option value="repeatOrders">舊客訂單數</option><option value="favoriteNew">本月加入最愛</option><option value="favoriteTotal">加入最愛總計</option></select></label><label>順序<select id="paOrder"><option value="desc">由大到小</option><option value="asc">由小到大</option></select></label></div><div class="table"><table data-no-auto-filter="1"><thead><tr><th>月份</th><th>商品番号（SKU）</th><th>商品管理番号（商品編號）</th><th>中文商品名</th><th>銷售額</th><th>銷售訂單數</th><th>銷售商品數</th><th>商品頁流量</th><th>RPP廣告流量</th><th>自然流量</th><th>轉換率</th><th>新客訂單數</th><th>舊客訂單數</th><th>本月加入最愛</th><th>加入最愛總計</th></tr></thead><tbody id="paRows"></tbody></table></div><p class="muted">轉換率＝銷售訂單數 ÷ 商品頁流量 × 100%；自然流量＝商品頁流量－RPP 廣告點擊數。</p></div></section>
-<section id="master" class="page"><div class="card editor"><h3>上傳商品主檔</h3><label>匯入方式<select id="productImportMode"><option value="merge">更新／新增商品</option><option value="replace">完全取代商品主檔</option></select></label><input id="productFile" type="file" accept=".csv"><p id="productStatus">必要欄位：商品番号、商品管理番号、中文商品名。商品番号為同一商品不同變體的 SKU，並作為唯一 ID；商品管理番号為商品編號。</p></div><div class="card"><h3>商品主檔資料</h3><input id="masterSearch" placeholder="搜尋商品番号（SKU）、商品管理番号（商品編號）、中文品名、專案、廠商或條碼"><div class="table"><table><thead><tr><th>商品番号（SKU）</th><th>商品管理番号（商品編號）</th><th>中文商品名</th><th>專案名稱</th><th>廠商名</th><th>商品供應價（NT$）</th><th>樂天日幣售價</th><th>NETSEA日幣售價</th><th>Shopify售價</th><th>商品條碼</th></tr></thead><tbody id="masterRows"></tbody></table></div></div></section>
+<section id="master" class="page"><div class="card editor"><h3>上傳商品主檔</h3><label>匯入方式<select id="productImportMode">
+<option value="merge">更新／新增商品</option>
+<option value="partial">指定欄位更新（空白不修改）</option>
+<option value="replace">完全取代商品主檔</option>
+</select></label><input id="productFile" type="file" accept=".csv"><p id="productStatus">完整匯入：必要欄位為商品番号、商品管理番号、中文商品名。指定欄位更新：以「商品規格管理編號／商品番号」＋「商品管理編號／商品管理番号」雙重確認商品；CSV 有值才覆蓋，空白欄位不修改原資料。</p>
+<div id="partialUpdateHelp" class="notice hidden">
+<strong>指定欄位更新規則</strong>
+<p>必要識別欄位：商品規格管理編號（亦支援商品番号）＋ 商品管理編號（亦支援商品管理番号）。其餘欄位只要有值才會更新；空白不會清空原資料。</p>
+<p>可更新：中文商品名、專案名稱、廠商名、商品供應價、樂天日幣售價、NETSEA日幣售價、Shopify售價、商品條碼。</p>
+</div></div><div class="card"><h3>商品主檔資料</h3><input id="masterSearch" placeholder="搜尋商品番号（SKU）、商品管理番号（商品編號）、中文品名、專案、廠商或條碼"><div class="table"><table><thead><tr><th>商品番号（SKU）</th><th>商品管理番号（商品編號）</th><th>中文商品名</th><th>專案名稱</th><th>廠商名</th><th>商品供應價（NT$）</th><th>樂天日幣售價</th><th>NETSEA日幣售價</th><th>Shopify售價</th><th>商品條碼</th></tr></thead><tbody id="masterRows"></tbody></table></div></div></section>
 <section id="import" class="page"><div class="grid2"><div class="card editor"><h3>上傳銷售 CSV</h3><label>平台<select id="importPlatform"><option value="">請選擇平台</option><option value="rakuten">Rakuten</option><option value="shopify">Shopify</option></select></label><label>重複資料<select id="duplicate"><option value="skip">跳過重複</option><option value="overwrite">覆蓋既有</option></select></label><input id="salesFile" type="file" accept=".csv"><p id="salesStatus">Rakuten：自動讀取日文編碼；同一平台＋注文番号只計一次，既有重複匯入資料也會在報表端自動排除「商品合計金額＋送料合計－店舗発行クーポン利用額」。Shopify：日期讀取 Created at；Financial Status refunded 不匯入。</p></div><div class="card editor"><h3>上傳樂天廣告 CSV</h3><label>重複資料<select id="adDuplicate"><option value="skip">跳過重複</option><option value="overwrite">覆蓋既有</option></select></label><input id="adFile" type="file" accept=".csv"><p id="adStatus">自動讀取日文編碼，並自動將第 8 列辨識為表頭。讀取：日付、商品管理番号、CTR(%)、クリック数(合計)、実績額(合計)、売上金額(合計720時間)、売上件数(合計720時間)。</p></div><div class="card editor"><h3>上傳商品分析 CSV</h3><label>資料月份（自動辨識）<input id="paImportMonth" type="month" readonly></label><label>重複資料<select id="paDuplicate"><option value="overwrite">覆蓋既有</option><option value="skip">跳過重複</option></select></label><input id="paFile" type="file" accept=".csv"><p id="paStatus">自動判斷 UTF-8 / Shift_JIS 日文編碼；自動搜尋「表示期間」日期與商品分析表頭（不固定列數）。讀取欄位：商品番号、売上、売上件数、売上個数、アクセス人数、新規購入件数、リピート購入件数、お気に入り登録ユーザ数、お気に入り総ユーザ数。</p><div id="paProgressWrap" class="import-progress" aria-live="polite"><div class="import-progress-head"><span id="paProgressText">等待選擇商品分析 CSV</span><strong id="paProgressPercent">0%</strong></div><div class="import-progress-track"><div id="paProgressBar" class="import-progress-bar" style="width:0%"></div></div></div></div></div></section>
 
 <section id="maintenance" class="page">

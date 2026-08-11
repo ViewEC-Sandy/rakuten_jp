@@ -10,11 +10,16 @@ import {initializeApp} from 'https://www.gstatic.com/firebasejs/10.12.4/firebase
 import {getAuth,onAuthStateChanged,signInWithEmailAndPassword,sendPasswordResetEmail,signOut} from 'https://www.gstatic.com/firebasejs/10.12.4/firebase-auth.js';
 import {getFirestore,doc,getDoc,setDoc,collection,getDocs,query,where,writeBatch,serverTimestamp,Timestamp,orderBy,limit} from 'https://www.gstatic.com/firebasejs/10.12.4/firebase-firestore.js';
 
+// V11.4.4 compatibility guard:
+// Some older deployed builds referenced renderParams during post-import rendering.
+// Keep a harmless callable/object fallback so a stale code path cannot abort a completed import.
+function renderParams(){ return {}; }
+
 const app=initializeApp(firebaseConfig),auth=getAuth(app),db=getFirestore(app),$=id=>document.getElementById(id);
 const state={user:null,role:'viewer',sales:[],compare:[],products:new Map(),productsByManagement:new Map(),platforms:new Set(),ads:[],productAnalytics:[],overviewAds:[],overviewAnalytics:[],adsLoaded:false,productAnalyticsLoaded:false,charts:{}};
 const HIDE_PROJECTS=new Set(['GOOD LIFE','Taiwan Pavilion','未設定專案']);
 const isHiddenProject=value=>HIDE_PROJECTS.has(String(value||'').trim());
-const titles={overview:'營運總覽',platforms:'平台比較',products:'商品跨平台',groups:'專案分析',ads:'樂天廣告分析',productAnalysis:'商品分析',master:'商品主檔',import:'資料匯入',history:'匯入紀錄',maintenance:'系統維護'};
+const titles={overview:'營運總覽',platforms:'平台比較',profitability:'收益結構分析',products:'商品跨平台',groups:'專案分析',ads:'樂天廣告分析',productAnalysis:'商品分析',master:'商品主檔',import:'資料匯入',history:'匯入紀錄',maintenance:'系統維護'};
 
 const salesImportProfiles={
   rakuten:{orderId:['注文番号'],date:['注文日'],productId:['商品番号'],managementNumber:['商品管理番号'],quantity:['個数','数量'],unitPrice:['単価','商品単価'],itemTotal:['商品合計金額'],shippingTotal:['送料合計'],coupon:['店舗発行クーポン利用額'],status:['ステータス'],cancelled:['900']},
@@ -22,15 +27,16 @@ const salesImportProfiles={
 };
 
 document.querySelectorAll('[data-page]').forEach(b=>b.onclick=()=>show(b.dataset.page));
-function show(id){document.querySelectorAll('[data-page]').forEach(b=>b.classList.toggle('active',b.dataset.page===id));document.querySelectorAll('.page').forEach(s=>s.classList.toggle('active',s.id===id));$('title').textContent=titles[id]||'';if(id==='history')loadHistory();if(id==='ads')loadAds();if(id==='productAnalysis')loadProductAnalytics();if(id==='maintenance')loadMaintenance()}
+function show(id){document.querySelectorAll('[data-page]').forEach(b=>b.classList.toggle('active',b.dataset.page===id));document.querySelectorAll('.page').forEach(s=>s.classList.toggle('active',s.id===id));$('title').textContent=titles[id]||'';document.querySelector('.filters')?.classList.toggle('hidden',id==='profitability');if(id==='history')loadHistory();if(id==='ads')loadAds();if(id==='productAnalysis')loadProductAnalytics();if(id==='maintenance')loadMaintenance();if(id==='profitability')renderProfitability()}
 $('loginBtn').onclick=async()=>{try{$('loginMsg').textContent='登入中…';await signInWithEmailAndPassword(auth,$('email').value.trim(),$('password').value)}catch(e){$('loginMsg').textContent=e.code?.includes('invalid-credential')?'Email 或密碼不正確':e.message}};
 $('resetBtn').onclick=async()=>{const e=$('email').value.trim();if(!e)return $('loginMsg').textContent='請先輸入 Email';try{await sendPasswordResetEmail(auth,e);$('loginMsg').textContent='重設密碼信已寄出'}catch(x){$('loginMsg').textContent=x.message}};
 $('logoutBtn').onclick=()=>signOut(auth);$('refreshBtn').onclick=()=>{syncAnalysisMonthRange();loadReports()};$('applyBtn').onclick=()=>{syncAnalysisMonthRange();loadReports()};$('granularity').onchange=()=>renderTrend();$('printBtn').onclick=()=>window.print();$('exportCsvBtn').onclick=()=>exportCurrentPage('csv');$('exportExcelBtn').onclick=()=>exportCurrentPage('xlsx');$('productSearch').oninput=renderProducts;$('productProjectFilter').onchange=renderProducts;$('groupSearch').oninput=renderGroups;$('masterSearch').oninput=renderMaster;
 ['adMonthStart','adMonthEnd','adProjectFilter','adSearch','adSort','adOrder'].forEach(id=>$(id).addEventListener(id==='adSearch'?'input':'change',renderAds));
 ['paMonthStart','paMonthEnd','paProjectFilter','paSearch','paSort','paOrder'].forEach(id=>$(id).addEventListener(id==='paSearch'?'input':'change',renderProductAnalytics));
 $('refreshMaintenanceBtn').onclick=loadMaintenance;$('healthCheckBtn').onclick=runHealthCheck;$('deleteSelectedBtn').onclick=deleteSelectedData;$('resetAllBtn').onclick=resetAllImportedData;$('rebuildIndexBtn').onclick=rebuildProductIndexes;$('recalculateBtn').onclick=recalculateDashboard;
+setupProfitabilityEvents();
 
-onAuthStateChanged(auth,async user=>{$('loading').classList.add('hidden');if(!user){$('login').classList.remove('hidden');$('app').classList.add('hidden');return}state.user=user;await ensureUser();await loadRole();applyRole();$('userText').textContent=user.email||'';$('roleText').textContent='角色：'+state.role;$('login').classList.add('hidden');$('app').classList.remove('hidden');setDates();setMonthInputs();setupTableFilters();await loadProductMaster();await loadPlatforms();await loadReports()});
+onAuthStateChanged(auth,async user=>{$('loading').classList.add('hidden');if(!user){$('login').classList.remove('hidden');$('app').classList.add('hidden');return}state.user=user;await ensureUser();await loadRole();applyRole();$('userText').textContent=user.email||'';$('roleText').textContent='角色：'+state.role;$('login').classList.add('hidden');$('app').classList.remove('hidden');setDates();setMonthInputs();setupTableFilters();initProfitability();await loadProductMaster();await loadPlatforms();await loadReports()});
 async function ensureUser(){const r=doc(db,'users',state.user.uid),s=await getDoc(r);if(!s.exists())await setDoc(r,{email:state.user.email||'',role:'viewer',createdAt:serverTimestamp(),lastLogin:serverTimestamp()});else await setDoc(r,{lastLogin:serverTimestamp()},{merge:true})}
 async function loadRole(){const s=await getDoc(doc(db,'users',state.user.uid));state.role=s.exists()?(s.data().role||'viewer'):'viewer'}
 function applyRole(){const edit=['admin','manager'].includes(state.role);document.querySelectorAll('.editor').forEach(x=>x.classList.toggle('hidden',!edit));$('viewerNotice').classList.toggle('hidden',edit)}
@@ -308,8 +314,185 @@ function renderGroups(){const q=$('groupSearch').value.trim().toLowerCase(),m=ne
 
 function renderMaster(){const q=$('masterSearch').value.trim().toLowerCase();$('masterRows').innerHTML=[...state.products.values()].filter(p=>!q||((p.id||'')+' '+(p.managementNumber||'')+' '+(p.nameZh||'')+' '+(p.projectName||'')+' '+(p.vendorName||'')+' '+(p.barcode||'')).toLowerCase().includes(q)).sort((a,b)=>String(a.id).localeCompare(String(b.id),'ja')).map(p=>`<tr><td>${esc(p.id)}</td><td>${esc(p.managementNumber)}</td><td>${esc(p.nameZh||p.name)}</td><td>${esc(p.projectName)}</td><td>${esc(p.vendorName)}</td><td>${twd(p.supplyPrice)}</td><td>${yen(p.rakutenPriceJpy)}</td><td>${yen(p.netseaPriceJpy)}</td><td>${yen(p.shopifyPrice)}</td><td>${esc(p.barcode)}</td></tr>`).join('')}
 
+$('productImportMode').onchange=()=>{
+  const partial=$('productImportMode').value==='partial';
+  $('partialUpdateHelp')?.classList.toggle('hidden',!partial);
+};
 $('productFile').onchange=e=>e.target.files?.[0]&&importProducts(e.target.files[0]);
-async function importProducts(file){const mode=$('productImportMode')?.value||'merge';$('productStatus').textContent='讀取中…';Papa.parse(file,{header:true,skipEmptyLines:'greedy',complete:async r=>{try{const parsed=r.data.map((x,i)=>({id:pick(x,['商品番号']),productNumber:pick(x,['商品番号']),managementNumber:pick(x,['商品管理番号']),nameZh:pick(x,['中文商品名','中文品名','商品名（中文）']),projectName:pick(x,['專案名稱']),vendorName:pick(x,['廠商名']),supplyPrice:num(pick(x,['商品供應價'])),rakutenPriceJpy:num(pick(x,['樂天日幣售價'])),netseaPriceJpy:num(pick(x,['NETSEA日幣售價'])),shopifyPrice:num(pick(x,['Shopify售價'])),barcode:pick(x,['商品條碼']),sourceRow:i+2})).filter(x=>x.id);if(!parsed.length)throw new Error('CSV 找不到商品番号');const mp=new Map();parsed.forEach(x=>mp.set(String(x.id),x));const rows=[...mp.values()].map(({sourceRow,...x})=>x),duplicateCount=parsed.length-rows.length;let deleted=0;if(mode==='replace'){if(prompt(`此操作將刪除目前 ${state.products.size} 筆商品資料，再匯入 ${rows.length} 筆。\n請輸入 DELETE 確認：`)!=='DELETE'){ $('productStatus').textContent='已取消';$('productFile').value='';return}deleted=await deleteCollectionDocuments('products')}await batchWrite('products',rows,x=>x.id);await logImport(mode==='replace'?'productMasterReplace':'productMasterMerge','',file.name,rows.length,rows.length,0);$('productStatus').textContent=mode==='replace'?`完成：刪除 ${deleted} 筆，匯入 ${rows.length} 筆`:`完成：更新／新增 ${rows.length} 筆${duplicateCount?`，重複 ${duplicateCount} 列採最後一列`:''}`;$('productFile').value='';await loadProductMaster();renderProducts();renderGroups()}catch(e){console.error(e);$('productStatus').textContent='匯入失敗：'+e.message}}})}
+async function importProducts(file){
+  const mode=$('productImportMode')?.value||'merge';
+  if(mode==='partial')return importPartialProductFields(file);
+
+  $('productStatus').textContent='讀取中…';
+  Papa.parse(file,{header:true,skipEmptyLines:'greedy',complete:async r=>{
+    try{
+      const parsed=r.data.map((x,i)=>({
+        id:pick(x,['商品番号','商品規格管理編號','商品規格管理番号']),
+        productNumber:pick(x,['商品番号','商品規格管理編號','商品規格管理番号']),
+        managementNumber:pick(x,['商品管理番号','商品管理編號']),
+        nameZh:pick(x,['中文商品名','中文品名','商品名（中文）']),
+        projectName:pick(x,['專案名稱']),
+        vendorName:pick(x,['廠商名']),
+        supplyPrice:num(pick(x,['商品供應價'])),
+        rakutenPriceJpy:num(pick(x,['樂天日幣售價'])),
+        netseaPriceJpy:num(pick(x,['NETSEA日幣售價'])),
+        shopifyPrice:num(pick(x,['Shopify售價'])),
+        barcode:pick(x,['商品條碼']),
+        sourceRow:i+2
+      })).filter(x=>x.id);
+      if(!parsed.length)throw new Error('CSV 找不到商品番号／商品規格管理編號');
+
+      const mp=new Map();
+      parsed.forEach(x=>mp.set(String(x.id),x));
+      const rows=[...mp.values()].map(({sourceRow,...x})=>x);
+      const duplicateCount=parsed.length-rows.length;
+
+      let deleted=0;
+      if(mode==='replace'){
+        if(prompt(`此操作將刪除目前 ${state.products.size} 筆商品資料，再匯入 ${rows.length} 筆。\n請輸入 DELETE 確認：`)!=='DELETE'){
+          $('productStatus').textContent='已取消';
+          $('productFile').value='';
+          return;
+        }
+        deleted=await deleteCollectionDocuments('products');
+      }
+
+      await batchWrite('products',rows,x=>x.id);
+      await logImport(mode==='replace'?'productMasterReplace':'productMasterMerge','',file.name,rows.length,rows.length,0);
+      $('productStatus').textContent=mode==='replace'
+        ?`完成：刪除 ${deleted} 筆，匯入 ${rows.length} 筆`
+        :`完成：更新／新增 ${rows.length} 筆${duplicateCount?`，重複 ${duplicateCount} 列採最後一列`:''}`;
+
+      $('productFile').value='';
+      await loadProductMaster();
+      renderProducts();
+      renderGroups();
+    }catch(e){
+      console.error(e);
+      $('productStatus').textContent='匯入失敗：'+e.message;
+    }
+  }});
+}
+
+const PARTIAL_PRODUCT_FIELD_MAP=[
+  {keys:['中文商品名','中文品名','商品名（中文）'],field:'nameZh',type:'string',label:'中文商品名'},
+  {keys:['專案名稱'],field:'projectName',type:'string',label:'專案名稱'},
+  {keys:['廠商名'],field:'vendorName',type:'string',label:'廠商名'},
+  {keys:['商品供應價'],field:'supplyPrice',type:'number',label:'商品供應價'},
+  {keys:['樂天日幣售價'],field:'rakutenPriceJpy',type:'number',label:'樂天日幣售價'},
+  {keys:['NETSEA日幣售價'],field:'netseaPriceJpy',type:'number',label:'NETSEA日幣售價'},
+  {keys:['Shopify售價'],field:'shopifyPrice',type:'number',label:'Shopify售價'},
+  {keys:['商品條碼'],field:'barcode',type:'string',label:'商品條碼'}
+];
+
+function getNonBlankRaw(row,keys){
+  for(const k of keys){
+    if(row[k]!==undefined&&String(row[k]).trim()!=='')return String(row[k]).trim();
+  }
+  return '';
+}
+
+async function importPartialProductFields(file){
+  $('productStatus').textContent='指定欄位更新：讀取 CSV 中…';
+
+  Papa.parse(file,{header:true,skipEmptyLines:'greedy',complete:async r=>{
+    try{
+      if(!state.products.size)await loadProductMaster();
+
+      const rows=r.data||[];
+      if(!rows.length)throw new Error('CSV 沒有可更新的資料');
+
+      const headers=(r.meta?.fields||[]).map(x=>String(x||'').trim());
+      const hasSku=headers.some(h=>['商品規格管理編號','商品規格管理番号','商品番号'].includes(h));
+      const hasManagement=headers.some(h=>['商品管理編號','商品管理番号'].includes(h));
+      if(!hasSku||!hasManagement){
+        throw new Error('指定欄位更新需要同時包含「商品規格管理編號／商品番号」與「商品管理編號／商品管理番号」');
+      }
+
+      const recognizedFields=PARTIAL_PRODUCT_FIELD_MAP.filter(def=>def.keys.some(k=>headers.includes(k)));
+      if(!recognizedFields.length){
+        throw new Error('CSV 沒有任何可更新欄位。請加入中文商品名、專案名稱、廠商名、商品供應價、平台售價或商品條碼等欄位');
+      }
+
+      const updates=[];
+      const errors=[];
+      let skipped=0;
+      const updatedFieldsCount={};
+
+      rows.forEach((row,i)=>{
+        const rowNo=i+2;
+        const sku=getNonBlankRaw(row,['商品規格管理編號','商品規格管理番号','商品番号']);
+        const management=getNonBlankRaw(row,['商品管理編號','商品管理番号']);
+
+        if(!sku&&!management){skipped++;return}
+        if(!sku||!management){
+          errors.push(`第 ${rowNo} 列：兩個識別編號不可缺一`);
+          return;
+        }
+
+        const product=findProduct(sku);
+        if(!product){
+          errors.push(`第 ${rowNo} 列：找不到商品規格管理編號／SKU「${sku}」`);
+          return;
+        }
+
+        if(normKey(product.managementNumber)!==normKey(management)){
+          errors.push(`第 ${rowNo} 列：編號不一致。SKU「${sku}」目前對應「${product.managementNumber||''}」，CSV 為「${management}」`);
+          return;
+        }
+
+        const patch={id:product.id};
+        let changed=0;
+
+        recognizedFields.forEach(def=>{
+          const raw=getNonBlankRaw(row,def.keys);
+          if(raw==='')return;  // 空白 = 不修改
+          patch[def.field]=def.type==='number'?num(raw):raw;
+          changed++;
+          updatedFieldsCount[def.label]=(updatedFieldsCount[def.label]||0)+1;
+        });
+
+        if(!changed){skipped++;return}
+        updates.push(patch);
+      });
+
+      if(!updates.length){
+        const detail=errors.slice(0,5).join('；');
+        throw new Error(`沒有可寫入的更新資料${detail?'。'+detail:''}`);
+      }
+
+      if(errors.length){
+        const preview=errors.slice(0,8).join('\n');
+        const ok=confirm(`發現 ${errors.length} 筆不會更新的資料：\n\n${preview}${errors.length>8?`\n…另有 ${errors.length-8} 筆`:''}\n\n其餘 ${updates.length} 筆仍要繼續更新嗎？`);
+        if(!ok){
+          $('productStatus').textContent='已取消指定欄位更新';
+          $('productFile').value='';
+          return;
+        }
+      }
+
+      const started=Date.now();
+      await batchWrite('products',updates,x=>x.id,(done,total)=>{
+        $('productStatus').textContent=`指定欄位更新中：${done} / ${total}`;
+      });
+
+      await logImport('productPartialUpdate','',file.name,rows.length,updates.length,skipped+errors.length);
+      await loadProductMaster();
+      renderProducts();
+      renderGroups();
+
+      const fieldsSummary=Object.entries(updatedFieldsCount).map(([k,v])=>`${k} ${v}`).join('、');
+      $('productStatus').textContent=
+        `指定欄位更新完成：成功 ${updates.length} 筆、跳過 ${skipped} 筆、錯誤 ${errors.length} 筆；更新欄位：${fieldsSummary||'—'}；耗時 ${((Date.now()-started)/1000).toFixed(1)} 秒`;
+
+      $('productFile').value='';
+    }catch(e){
+      console.error(e);
+      $('productStatus').textContent='指定欄位更新失敗：'+e.message;
+    }
+  }});
+}
+
 async function deleteCollectionDocuments(collectionName,onProgress){const snap=await getDocs(collection(db,collectionName)),total=snap.docs.length;for(let i=0;i<total;i+=400){const batch=writeBatch(db),part=snap.docs.slice(i,i+400);part.forEach(d=>batch.delete(d.ref));await commitWithRetry(batch);onProgress?.(Math.min(i+part.length,total),total);if(i+part.length<total)await wait(100)}return total}
 
 $('salesFile').onchange=e=>e.target.files?.[0]&&importSales(e.target.files[0]);
@@ -429,11 +612,36 @@ async function importProductAnalytics(file){
     updatePaProgress(98,'重新整理商品分析資料…');
     $('paStatus').textContent=`完成：表示期間 ${r.period.label}；表頭第 ${r.headerIndex+1} 列；彙整 ${rows.length} 筆、寫入 ${write.length}、跳過 ${skipped}${r.warningCount?`；略過 ${r.warningCount} 個引號警告`:''}`;
     $('paFile').value='';
-    await loadProductAnalytics();
-    updatePaProgress(100,`完成：${r.period.start} ～ ${r.period.end}，寫入 ${write.length} 筆，跳過 ${skipped} 筆`);
-  }catch(e){console.error(e);$('paStatus').textContent='匯入失敗：'+e.message;updatePaProgress(100,'匯入失敗：'+e.message)}
+    updatePaProgress(98,'資料已寫入，重新整理商品分析畫面…');
+
+    // Important: the import itself is already complete at this point.
+    // A UI render error must not be reported as "匯入失敗".
+    try{
+      await loadProductAnalytics();
+      updatePaProgress(100,`完成：${r.period.start} ～ ${r.period.end}，寫入 ${write.length} 筆，跳過 ${skipped} 筆`);
+    }catch(renderError){
+      console.error('商品分析資料已寫入，但畫面重新整理失敗：',renderError);
+      $('paStatus').textContent=`匯入完成：已寫入 ${write.length} 筆、跳過 ${skipped} 筆。畫面重新整理時發生錯誤：${renderError.message}。請切換頁面或重新整理瀏覽器。`;
+      updatePaProgress(100,`資料寫入完成；畫面更新錯誤：${renderError.message}`);
+    }
+  }catch(e){
+    console.error(e);
+    $('paStatus').textContent='匯入失敗：'+e.message;
+    updatePaProgress(100,'匯入失敗：'+e.message);
+  }
 }
-async function loadProductAnalytics(){const s=await getDocs(collection(db,'productAnalytics'));state.productAnalytics=s.docs.map(d=>({id:d.id,...d.data()}));state.productAnalyticsLoaded=true;fillPaFilters();if(!state.adsLoaded){const a=await getDocs(collection(db,'ads'));state.ads=a.docs.map(d=>({id:d.id,...d.data()}));state.adsLoaded=true}renderProductAnalytics()}
+async function loadProductAnalytics(){
+  const s=await getDocs(collection(db,'productAnalytics'));
+  state.productAnalytics=s.docs.map(d=>({id:d.id,...d.data()}));
+  state.productAnalyticsLoaded=true;
+  fillPaFilters();
+  if(!state.adsLoaded){
+    const a=await getDocs(collection(db,'ads'));
+    state.ads=a.docs.map(d=>({id:d.id,...d.data()}));
+    state.adsLoaded=true;
+  }
+  if(typeof renderProductAnalytics==='function')renderProductAnalytics();
+}
 function fillPaFilters(){const projectCurrent=$('paProjectFilter').value;const projects=[...new Set([...state.products.values()].map(p=>p.projectName).filter(v=>v&&!isHiddenProject(v)))].sort();$('paProjectFilter').innerHTML='<option value="">全部專案</option>'+projects.map(v=>`<option value="${esc(v)}">${esc(v)}</option>`).join('');$('paProjectFilter').value=projectCurrent}
 function renderProductAnalytics(){if(!$('paRows'))return;const monthStart=$('paMonthStart').value,monthEnd=$('paMonthEnd').value,pf=$('paProjectFilter').value,q=$('paSearch').value.trim().toLowerCase(),sortKey=$('paSort').value,order=$('paOrder').value==='asc'?1:-1;const adClicks=new Map();state.ads.forEach(a=>{const ref=resolveAdProductReference(a),pid=ref.product?.id||a.productId||a.managementNumber||'';if(pid)adClicks.set(a.month+'||'+pid,(adClicks.get(a.month+'||'+pid)||0)+num(a.clicks))});const rows=state.productAnalytics.map(r=>{const ref=resolveProductAnalysisReference(r),rppTraffic=(adClicks.get(r.month+'||'+r.productId)||adClicks.get(r.month+'||'+ref.product?.id)||0),traffic=num(r.traffic);return{...r,managementNumber:ref.managementNumber||r.managementNumber||'',nameZh:ref.nameZh||'',projectName:ref.projectName||'',rppTraffic,organicTraffic:traffic-rppTraffic,conversionRate:traffic?num(r.salesOrders)/traffic*100:0}}).filter(r=>!isHiddenProject(r.projectName)&&inMonthRange(r.month,monthStart,monthEnd)&&(!pf||r.projectName===pf)&&(!q||(r.productId+' '+r.managementNumber+' '+r.nameZh+' '+r.projectName).toLowerCase().includes(q))).sort((a,b)=>(num(a[sortKey])-num(b[sortKey]))*order);const totals={sales:sum(rows.map(x=>x.sales)),salesOrders:sum(rows.map(x=>x.salesOrders)),salesQuantity:sum(rows.map(x=>x.salesQuantity)),traffic:sum(rows.map(x=>x.traffic)),rppTraffic:sum(rows.map(x=>x.rppTraffic)),newOrders:sum(rows.map(x=>x.newOrders)),repeatOrders:sum(rows.map(x=>x.repeatOrders))};totals.organicTraffic=totals.traffic-totals.rppTraffic;totals.conversionRate=totals.traffic?totals.salesOrders/totals.traffic*100:0;$('paKpis').innerHTML=[['銷售額',yen(totals.sales)],['銷售訂單數',fmt(totals.salesOrders)],['商品頁流量',fmt(totals.traffic)],['自然流量',fmt(totals.organicTraffic)],['轉換率',pct(totals.conversionRate)]].map(([n,v])=>`<div class="kpi"><span>${n}</span><strong>${v}</strong></div>`).join('');$('paRows').innerHTML=rows.map(x=>`<tr><td>${esc(x.month)}</td><td>${esc(x.productId)}</td><td>${esc(x.managementNumber)}</td><td>${productNameCell(x.nameZh||'未對應')}</td><td>${yen(x.sales)}</td><td>${fmt(x.salesOrders)}</td><td>${fmt(x.salesQuantity)}</td><td>${fmt(x.traffic)}</td><td>${fmt(x.rppTraffic)}</td><td>${fmt(x.organicTraffic)}</td><td>${pct(x.conversionRate)}</td><td>${fmt(x.newOrders)}</td><td>${fmt(x.repeatOrders)}</td><td>${fmt(x.favoriteNew)}</td><td>${fmt(x.favoriteTotal)}</td></tr>`).join('')}
 
@@ -494,6 +702,82 @@ async function batchWrite(c,rows,id,onProgress){
     if(i+part.length<total)await wait(100);
   }
 }
+
+// V11.6: 收益結構分析 -------------------------------------------------------
+const PROFIT_DEFAULTS={vendors:[{name:'',amount:0,note:''}],ads:[{name:'',spend:0,sales:0,note:''}]};
+function setupProfitabilityEvents(){
+  const ids=['profitYear','profitPlatform','profitFx','profitSalesJpy','profitPlatformFeeJpy','profitCouponJpy','profitOperationJpy','profitShippingTwd','profitWarehouseTwd'];
+  ids.forEach(id=>$(id)?.addEventListener('input',renderProfitability));
+  $('addVendorRowBtn')?.addEventListener('click',()=>{appendVendorRow();renderProfitability()});
+  $('addAdCostRowBtn')?.addEventListener('click',()=>{appendProfitAdRow();renderProfitability()});
+  $('profitSaveBtn')?.addEventListener('click',saveProfitability);
+  $('profitLoadBtn')?.addEventListener('click',loadProfitability);
+  $('profitClearBtn')?.addEventListener('click',()=>{if(confirm('確定清空目前收益結構輸入內容？'))resetProfitabilityForm()});
+}
+function initProfitability(){
+  if(!$('profitYear'))return;
+  if(!$('profitYear').value)$('profitYear').value=new Date().getFullYear();
+  if(!$('profitPlatform').value)$('profitPlatform').value='Rakuten';
+  if(!$('vendorCostRows').children.length)appendVendorRow();
+  if(!$('profitAdRows').children.length)appendProfitAdRow();
+  renderProfitability();
+}
+function profitInput(id){return num($(id)?.value)}
+function profitDocId(){const year=String($('profitYear')?.value||new Date().getFullYear()).trim(),platform=String($('profitPlatform')?.value||'未設定平台').trim()||'未設定平台';return safe(year+'_'+platform)}
+function rowActionButton(kind){const editable=['admin','manager'].includes(state.role);return editable?`<button type="button" class="danger profit-remove" data-kind="${kind}">刪除</button>`:''}
+function appendVendorRow(data={}){
+  const tr=document.createElement('tr');
+  tr.innerHTML=`<td><input class="vendor-name" placeholder="專案名稱" value="${esc(data.name||'')}"></td><td><input class="vendor-amount" type="number" min="0" step="1" placeholder="0" value="${num(data.amount)||''}"></td><td><input class="vendor-note" placeholder="備註" value="${esc(data.note||'')}"></td><td class="editor">${rowActionButton('vendor')}</td>`;
+  tr.querySelectorAll('input').forEach(x=>x.addEventListener('input',renderProfitability));
+  tr.querySelector('.profit-remove')?.addEventListener('click',()=>{tr.remove();if(!$('vendorCostRows').children.length)appendVendorRow();renderProfitability()});
+  $('vendorCostRows').appendChild(tr);
+}
+function appendProfitAdRow(data={}){
+  const tr=document.createElement('tr');
+  tr.innerHTML=`<td><input class="profit-ad-name" placeholder="廣告項目" value="${esc(data.name||'')}"></td><td><input class="profit-ad-spend" type="number" min="0" step="1" placeholder="0" value="${num(data.spend)||''}"></td><td><input class="profit-ad-sales" type="number" min="0" step="1" placeholder="0" value="${num(data.sales)||''}"></td><td class="profit-ad-roas">0%</td><td><input class="profit-ad-note" placeholder="備註" value="${esc(data.note||'')}"></td><td class="editor">${rowActionButton('ad')}</td>`;
+  tr.querySelectorAll('input').forEach(x=>x.addEventListener('input',renderProfitability));
+  tr.querySelector('.profit-remove')?.addEventListener('click',()=>{tr.remove();if(!$('profitAdRows').children.length)appendProfitAdRow();renderProfitability()});
+  $('profitAdRows').appendChild(tr);
+}
+function collectVendorRows(){return [...$('vendorCostRows').querySelectorAll('tr')].map(tr=>({name:tr.querySelector('.vendor-name')?.value.trim()||'',amount:profitRowNum(tr,'.vendor-amount'),note:tr.querySelector('.vendor-note')?.value.trim()||''}))}
+function collectProfitAdRows(){return [...$('profitAdRows').querySelectorAll('tr')].map(tr=>({name:tr.querySelector('.profit-ad-name')?.value.trim()||'',spend:profitRowNum(tr,'.profit-ad-spend'),sales:profitRowNum(tr,'.profit-ad-sales'),note:tr.querySelector('.profit-ad-note')?.value.trim()||''}))}
+function profitRowNum(tr,selector){return num(tr.querySelector(selector)?.value)}
+function profitabilityValues(){
+  const fx=profitInput('profitFx'),salesJpy=profitInput('profitSalesJpy'),platformFee=profitInput('profitPlatformFeeJpy'),coupon=profitInput('profitCouponJpy'),operation=profitInput('profitOperationJpy'),shipping=profitInput('profitShippingTwd'),warehouse=profitInput('profitWarehouseTwd');
+  const vendors=collectVendorRows(),ads=collectProfitAdRows(),vendorTotal=sum(vendors.map(x=>x.amount)),adSpend=sum(ads.map(x=>x.spend)),adSales=sum(ads.map(x=>x.sales));
+  const salesTwd=salesJpy*fx,fixedJpy=platformFee+coupon+operation,jpyCosts=fixedJpy+adSpend,jpyCostsTwd=jpyCosts*fx,nativeTwd=vendorTotal+shipping+warehouse,totalCostTwd=jpyCostsTwd+nativeTwd,profitTwd=salesTwd-totalCostTwd,profitJpy=fx?profitTwd/fx:0,margin=salesTwd?profitTwd/salesTwd*100:0,tacos=salesJpy?adSpend/salesJpy*100:0,roas=adSpend?adSales/adSpend*100:0;
+  return{fx,salesJpy,salesTwd,platformFee,coupon,operation,shipping,warehouse,vendors,ads,vendorTotal,adSpend,adSales,fixedJpy,jpyCosts,jpyCostsTwd,nativeTwd,totalCostTwd,profitTwd,profitJpy,margin,tacos,roas};
+}
+function renderProfitability(){
+  if(!$('profitKpis'))return;const v=profitabilityValues();
+  [...$('profitAdRows').querySelectorAll('tr')].forEach(tr=>{const spend=profitRowNum(tr,'.profit-ad-spend'),sales=profitRowNum(tr,'.profit-ad-sales');const cell=tr.querySelector('.profit-ad-roas');if(cell)cell.textContent=pct(spend?sales/spend*100:0)});
+  $('vendorCostTotal').textContent=twd(v.vendorTotal);$('profitAdSpendTotal').textContent=yen(v.adSpend);$('profitAdSalesTotal').textContent=yen(v.adSales);$('profitAdRoasTotal').textContent=pct(v.roas);$('profitFixedJpySubtotal').textContent=yen(v.fixedJpy);$('profitFixedJpyTwd').textContent=twd(v.fixedJpy*v.fx);$('profitNativeTwdSubtotal').textContent=twd(v.nativeTwd);
+  const cls=v.profitTwd>0?'pos':v.profitTwd<0?'neg':'muted';
+  $('profitKpis').innerHTML=[['平台銷售（TWD）',twd(v.salesTwd),''],['總成本（TWD）',twd(v.totalCostTwd),''],['平台利潤（TWD）',twd(v.profitTwd),cls],['平台利潤（JPY）',yen(v.profitJpy),cls],['利潤率',pct(v.margin),cls],['廣告費（TWD）',twd(v.adSpend*v.fx),''],['TAcoS',pct(v.tacos),''],['ROAS',pct(v.roas),'']].map(([n,val,c])=>`<div class="kpi"><span>${n}</span><strong class="${c}">${val}</strong></div>`).join('');
+  const salesBase=v.salesTwd;
+  const breakdown=[
+    ['平台銷售','JPY',v.salesJpy,v.salesTwd,false],['平台抽成','JPY',v.platformFee,v.platformFee*v.fx,true],['廣告費','JPY',v.adSpend,v.adSpend*v.fx,true],['クーポン値引額（店舗）','JPY',v.coupon,v.coupon*v.fx,true],['平台營運成本','JPY',v.operation,v.operation*v.fx,true],['廠商款項','TWD',v.vendorTotal,v.vendorTotal,true],['運費','TWD',v.shipping,v.shipping,true],['倉儲','TWD',v.warehouse,v.warehouse,true],['總成本','TWD',v.totalCostTwd,v.totalCostTwd,true],['平台利潤','TWD',v.profitTwd,v.profitTwd,false]
+  ];
+  $('profitBreakdownRows').innerHTML=breakdown.map(([name,currency,raw,twdValue,isCost])=>`<tr class="${name==='平台利潤'?(v.profitTwd>=0?'profit-result-row pos':'profit-result-row neg'):name==='總成本'?'profit-total-row':''}"><td>${esc(name)}</td><td>${currency}</td><td>${currency==='JPY'?yen(raw):twd(raw)}</td><td>${twd(twdValue)}</td><td>${salesBase?pct(twdValue/salesBase*100):'0%'}</td></tr>`).join('');
+}
+function resetProfitabilityForm(){
+  ['profitFx','profitSalesJpy','profitPlatformFeeJpy','profitCouponJpy','profitOperationJpy','profitShippingTwd','profitWarehouseTwd'].forEach(id=>{$(id).value=''});
+  $('vendorCostRows').innerHTML='';$('profitAdRows').innerHTML='';appendVendorRow();appendProfitAdRow();$('profitStatus').textContent='已清空目前輸入內容';renderProfitability();
+}
+async function saveProfitability(){
+  if(!['admin','manager'].includes(state.role))return $('profitStatus').textContent='Viewer 無法儲存';
+  const year=String($('profitYear').value||'').trim(),platform=String($('profitPlatform').value||'').trim();if(!year||!platform)return $('profitStatus').textContent='請輸入年分與平台';
+  try{$('profitStatus').textContent='儲存中…';const v=profitabilityValues();await setDoc(doc(db,'profitStructures',profitDocId()),{year:Number(year),platform,fx:v.fx,salesJpy:v.salesJpy,platformFeeJpy:v.platformFee,couponJpy:v.coupon,operationJpy:v.operation,shippingTwd:v.shipping,warehouseTwd:v.warehouse,vendors:v.vendors,ads:v.ads,updatedBy:state.user?.email||'',updatedAt:serverTimestamp()},{merge:true});$('profitStatus').textContent='已儲存：'+year+' / '+platform}catch(e){console.error(e);$('profitStatus').textContent='儲存失敗：'+e.message}
+}
+async function loadProfitability(){
+  const year=String($('profitYear').value||'').trim(),platform=String($('profitPlatform').value||'').trim();if(!year||!platform)return $('profitStatus').textContent='請輸入年分與平台';
+  try{$('profitStatus').textContent='讀取中…';const snap=await getDoc(doc(db,'profitStructures',profitDocId()));if(!snap.exists())return $('profitStatus').textContent='找不到此年分／平台的已儲存資料';applyProfitabilityData(snap.data());$('profitStatus').textContent='已讀取：'+year+' / '+platform}catch(e){console.error(e);$('profitStatus').textContent='讀取失敗：'+e.message}
+}
+function applyProfitabilityData(d={}){
+  $('profitYear').value=d.year||$('profitYear').value;$('profitPlatform').value=d.platform||$('profitPlatform').value;$('profitFx').value=d.fx??'';$('profitSalesJpy').value=d.salesJpy??'';$('profitPlatformFeeJpy').value=d.platformFeeJpy??'';$('profitCouponJpy').value=d.couponJpy??'';$('profitOperationJpy').value=d.operationJpy??'';$('profitShippingTwd').value=d.shippingTwd??'';$('profitWarehouseTwd').value=d.warehouseTwd??'';
+  $('vendorCostRows').innerHTML='';(Array.isArray(d.vendors)&&d.vendors.length?d.vendors:PROFIT_DEFAULTS.vendors).forEach(appendVendorRow);$('profitAdRows').innerHTML='';(Array.isArray(d.ads)&&d.ads.length?d.ads:PROFIT_DEFAULTS.ads).forEach(appendProfitAdRow);renderProfitability();
+}
+
 async function logImport(type,platform,fileName,total,written,skipped){await setDoc(doc(collection(db,'imports')),{type,platform,fileName,total,written,skipped,importedBy:state.user.email||'',importedAt:serverTimestamp()})}
 const MAINTENANCE_COLLECTIONS={products:'商品主檔',sales:'銷售資料',ads:'樂天廣告',productAnalytics:'商品分析',imports:'匯入紀錄',platforms:'平台資料'};
 async function collectionCount(name){const snap=await getDocs(collection(db,name));return snap.size}
