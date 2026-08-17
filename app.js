@@ -154,8 +154,12 @@ function formatBytes(bytes){
   return `${(n/1024/1024).toFixed(1)} MB`;
 }
 
-async function parseCsvAutoHeader(file,headerCandidates,onProgress){
-  const text=await readCsvTextWithProgress(file,onProgress);
+async function parseCsvAutoHeader(fileOrText,headerCandidates,onProgress){
+  // V11.6.1: accept either a File/Blob or an already-decoded CSV string.
+  // This prevents FileReader.readAsArrayBuffer() from receiving a string.
+  const text=typeof fileOrText==='string'
+    ? fileOrText
+    : await readCsvTextWithProgress(fileOrText,onProgress);
   return new Promise((resolve,reject)=>{
     Papa.parse(text,{header:false,skipEmptyLines:'greedy',complete:r=>{
       try{
@@ -539,13 +543,16 @@ $('paFile').onchange=e=>{const file=e.target.files?.[0];if(file)importProductAna
 async function importAds(file){
   $('adStatus').textContent='讀取中…';
   try{
-    const text=await readCsvText(file);
-    const r=await parseCsvAutoHeader(text,['日付','商品管理番号','CTR(%)','クリック数(合計)','実績額(合計)']);
+    const r=await parseCsvAutoHeader(
+      file,
+      ['日付','商品管理番号','CTR(%)','クリック数(合計)','実績額(合計)'],
+      (pct,text)=>{$('adStatus').textContent=`${text}（${pct}%）`}
+    );
     if(r.headerIndex!==7)console.info(`樂天廣告表頭自動辨識於第 ${r.headerIndex+1} 列`);
-    updatePaProgress(70,`整理商品分析資料中… 0 / ${r.data.length}`);
+    $('adStatus').textContent=`整理樂天廣告資料中… 0 / ${r.data.length}`;
     const grouped=new Map();
     r.data.forEach((x,i)=>{
-      if(i%500===0)updatePaProgress(70+Math.min(10,Math.round(i/Math.max(r.data.length,1)*10)),`整理商品分析資料中… ${i} / ${r.data.length}`);
+      if(i%500===0)$('adStatus').textContent=`整理樂天廣告資料中… ${i} / ${r.data.length}`;
       const rowNo=r.headerIndex+i+2,dateText=pick(x,['日付']),managementNumber=pick(x,['商品管理番号']);
       if(!dateText&&!managementNumber)return;
       if(!dateText)throw new Error(`第 ${rowNo} 列缺少「日付」`);
