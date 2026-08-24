@@ -113,6 +113,20 @@ function updatePaProgress(percent,text){
   const value=Math.max(0,Math.min(100,Math.round(Number(percent)||0)));
   bar.style.width=value+'%';pct.textContent=value+'%';label.textContent=text||'處理中…';
 }
+function updateSalesProgress(percent,text){
+  const wrap=$('salesProgressWrap'),bar=$('salesProgressBar'),pct=$('salesProgressPercent'),label=$('salesProgressText');
+  if(!wrap||!bar||!pct||!label)return;
+  wrap.classList.remove('hidden');
+  const value=Math.max(0,Math.min(100,Math.round(Number(percent)||0));
+  bar.style.width=value+'%';pct.textContent=value+'%';label.textContent=text||'處理中…';
+}
+function resetSalesProgress(){
+  const wrap=$('salesProgressWrap');
+  if(wrap)wrap.classList.remove('hidden');
+  if($('salesProgressBar'))$('salesProgressBar').style.width='0%';
+  if($('salesProgressPercent'))$('salesProgressPercent').textContent='0%';
+  if($('salesProgressText'))$('salesProgressText').textContent='等待選擇銷售 CSV';
+}
 function resetPaProgress(){
   const wrap=$('paProgressWrap');
   if(wrap)wrap.classList.remove('hidden');
@@ -624,41 +638,57 @@ async function deleteCollectionDocuments(collectionName,onProgress){const snap=a
 $('salesFile').onchange=e=>e.target.files?.[0]&&importSales(e.target.files[0]);
 async function importSales(file){
   const p=$('importPlatform').value,profile=salesImportProfiles[p];
-  if(!profile)return $('salesStatus').textContent='請先選擇平台';
-  $('salesStatus').textContent='讀取中…';
+  if(!profile){$('salesStatus').textContent='請先選擇平台';updateSalesProgress(0,'請先選擇平台');return}
+  const input=$('salesFile');
+  resetSalesProgress();updateSalesProgress(1,`準備讀取 ${file.name}…`);$('salesStatus').textContent='讀取中…';
+  if(input)input.disabled=true;
   try{
-    const source=p==='rakuten'?await readCsvText(file):file;
+    // Both Rakuten and Shopify now use the progress-aware reader. It also auto-detects UTF-8 / Shift_JIS.
+    const source=await readCsvTextWithProgress(file,(pct,text)=>updateSalesProgress(Math.min(48,pct),text));
+    updateSalesProgress(50,'解析 CSV 中…');
     Papa.parse(source,{header:true,skipEmptyLines:'greedy',complete:async r=>{try{
       const fatal=(r.errors||[]).find(e=>!['InvalidQuotes','MissingQuotes'].includes(e.code)&&!/quote/i.test(String(e.message||'')));
       if(fatal)throw new Error(`CSV 解析錯誤：第 ${fatal.row+2} 列 ${fatal.message}`);
-      let cancelled=0;const countedOrders=new Set();
-      const rows=r.data.map((x,i)=>{
-        const status=pick(x,profile.status||[]).toLowerCase();
-        if((profile.cancelled||[]).some(v=>status===String(v).toLowerCase())){cancelled++;return null}
+      updateSalesProgress(56,`CSV 解析完成，共 ${r.data.length} 列；檢查取消／退款訂單…`);
+      let cancelled=0;const countedOrders=new Set(),rows=[];
+      for(let i=0;i<r.data.length;i++){
+        const x=r.data[i],status=pick(x,profile.status||[]).toLowerCase();
+        if((profile.cancelled||[]).some(v=>status===String(v).toLowerCase())){cancelled++;continue}
         const date=pick(x,profile.date),orderId=pick(x,profile.orderId),productId=pick(x,profile.productId),managementNumber=pick(x,profile.managementNumber),line=String(i+1);
-        if(!date||!orderId||!productId)return null;
+        if(!date||!orderId||!productId)continue;
         const d=parseDate(date),quantity=num(pick(x,profile.quantity)),unitPrice=num(pick(x,profile.unitPrice));
         let grossRevenue=0,couponAmount=0,revenue=0;
         if(p==='rakuten'){
           const firstOrderRow=!countedOrders.has(orderId);countedOrders.add(orderId);
           const itemTotal=num(pick(x,profile.itemTotal||[])),shippingTotal=num(pick(x,profile.shippingTotal||[]));
-          couponAmount=num(pick(x,profile.coupon||[]));
-          grossRevenue=firstOrderRow?itemTotal+shippingTotal:0;
-          revenue=firstOrderRow?grossRevenue-couponAmount:0;
+          couponAmount=num(pick(x,profile.coupon||[]));grossRevenue=firstOrderRow?itemTotal+shippingTotal:0;revenue=firstOrderRow?grossRevenue-couponAmount:0;
         }else{
-          const directRevenue=pick(x,profile.revenue),value=directRevenue?num(directRevenue):unitPrice*quantity;
-          grossRevenue=value;revenue=value;
+          const directRevenue=pick(x,profile.revenue),value=directRevenue?num(directRevenue):unitPrice*quantity;grossRevenue=value;revenue=value;
         }
-        return{id:safe(p+'_'+orderId+'_'+productId+'_'+line),platform:canonicalPlatform(p),orderId,productId,managementNumber,quantity,unitPrice,grossRevenue,couponAmount,revenue,saleDate:Timestamp.fromDate(d),year:d.getFullYear(),month:monthFromDate(d),sourceFile:file.name,updatedAt:serverTimestamp()}
-      }).filter(Boolean);
+        rows.push({id:safe(p+'_'+orderId+'_'+productId+'_'+line),platform:canonicalPlatform(p),orderId,productId,managementNumber,quantity,unitPrice,grossRevenue,couponAmount,revenue,saleDate:Timestamp.fromDate(d),year:d.getFullYear(),month:monthFromDate(d),sourceFile:file.name,updatedAt:serverTimestamp()});
+        if(i%500===0)updateSalesProgress(56+Math.min(9,Math.round(i/Math.max(r.data.length,1)*9)),`整理銷售資料中… ${i} / ${r.data.length}`);
+      }
+      updateSalesProgress(66,`整理完成：有效 ${rows.length} 筆、取消／退款排除 ${cancelled} 筆`);
       let write=rows,skipped=0;
-      if($('duplicate').value==='skip'){$('salesStatus').textContent=`檢查重複資料中…（${rows.length} 筆）`;const existing=await existingIdSet('sales');write=rows.filter(x=>!existing.has(x.id));skipped=rows.length-write.length}
-      await batchWrite('sales',write,x=>x.id,(done,total)=>{$('salesStatus').textContent=`匯入銷售資料中… ${done} / ${total}（${Math.round(done/Math.max(total,1)*100)}%）`});const platformName=canonicalPlatform(p);await setDoc(doc(db,'platforms',platformName),{name:platformName,updatedAt:serverTimestamp()},{merge:true});await logImport('sales',p,file.name,r.data.length,write.length,skipped+cancelled);
-      $('salesStatus').textContent=`完成：有效 ${rows.length}、寫入 ${write.length}、重複跳過 ${skipped}、取消／退款排除 ${cancelled}。報表會依平台＋訂單編號自動避免營收重複計算`;await loadPlatforms();await loadReports()
-    }catch(e){console.error(e);$('salesStatus').textContent='匯入失敗：'+e.message}}})
-  }catch(e){console.error(e);$('salesStatus').textContent='匯入失敗：'+e.message}
+      if($('duplicate').value==='skip'){
+        $('salesStatus').textContent=`檢查重複資料中…（${rows.length} 筆）`;updateSalesProgress(68,`檢查重複資料中… ${rows.length} 筆`);
+        const existing=await existingIdSet('sales');write=rows.filter(x=>!existing.has(x.id));skipped=rows.length-write.length;
+      }
+      updateSalesProgress(72,`準備寫入資料庫… ${write.length} 筆`);
+      await batchWrite('sales',write,x=>x.id,(done,total)=>{
+        const ratio=total?done/total:1,overall=72+Math.round(ratio*23);
+        $('salesStatus').textContent=`匯入銷售資料中… ${done} / ${total}（${Math.round(ratio*100)}%）`;
+        updateSalesProgress(overall,`寫入資料庫中… ${done} / ${total}`);
+      });
+      updateSalesProgress(96,'銷售資料已寫入，更新平台與匯入紀錄…');
+      const platformName=canonicalPlatform(p);await setDoc(doc(db,'platforms',platformName),{name:platformName,updatedAt:serverTimestamp()},{merge:true});await logImport('sales',p,file.name,r.data.length,write.length,skipped+cancelled);
+      $('salesStatus').textContent=`完成：有效 ${rows.length}、寫入 ${write.length}、重複跳過 ${skipped}、取消／退款排除 ${cancelled}。報表會依平台＋訂單編號自動避免營收重複計算`;
+      updateSalesProgress(98,'資料寫入完成，重新整理報表…');await loadPlatforms();await loadReports();
+      updateSalesProgress(100,`完成：寫入 ${write.length} 筆、重複跳過 ${skipped} 筆、取消／退款排除 ${cancelled} 筆`);
+      if(input)input.value='';
+    }catch(e){console.error(e);$('salesStatus').textContent='匯入失敗：'+e.message;updateSalesProgress(100,'匯入失敗：'+e.message)}finally{if(input)input.disabled=false}}})
+  }catch(e){console.error(e);$('salesStatus').textContent='匯入失敗：'+e.message;updateSalesProgress(100,'匯入失敗：'+e.message);if(input)input.disabled=false}
 }
-
 
 $('adFile').onchange=e=>e.target.files?.[0]&&importAds(e.target.files[0]);
 $('paFile').onchange=e=>{const file=e.target.files?.[0];if(file)importProductAnalytics(file)};
