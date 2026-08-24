@@ -117,7 +117,7 @@ function updateSalesProgress(percent,text){
   const wrap=$('salesProgressWrap'),bar=$('salesProgressBar'),pct=$('salesProgressPercent'),label=$('salesProgressText');
   if(!wrap||!bar||!pct||!label)return;
   wrap.classList.remove('hidden');
-  const value=Math.max(0,Math.min(100,Math.round(Number(percent)||0));
+  const value=Math.max(0,Math.min(100,Math.round(Number(percent)||0)));
   bar.style.width=value+'%';pct.textContent=value+'%';label.textContent=text||'處理中…';
 }
 function resetSalesProgress(){
