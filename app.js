@@ -663,6 +663,15 @@ async function importSales(file){
       const fatal=(r.errors||[]).find(e=>!['InvalidQuotes','MissingQuotes'].includes(e.code)&&!/quote/i.test(String(e.message||'')));
       if(fatal)throw new Error(`CSV 解析錯誤：第 ${fatal.row+2} 列 ${fatal.message}`);
       updateSalesProgress(56,`CSV 解析完成，共 ${r.data.length} 列；檢查取消／退款訂單…`);
+      if(p==='rakuten'){
+        const sample=r.data.find(x=>pick(x,profile.orderId)&&pick(x,profile.productId));
+        const detectedUnit=sample?pick(sample,profile.unitPrice):'';
+        const headers=Object.keys(r.data[0]||{});
+        const unitHeader=headers.find(h=>normalizeCsvHeader(h)==='単価');
+        if(!unitHeader)throw new Error(`Rakuten CSV 找不到「単価」欄位。實際表頭共 ${headers.length} 欄，請確認上傳的是訂單明細 CSV。`);
+        if(sample&&!detectedUnit)throw new Error(`已找到「${unitHeader}」欄，但第一筆有效商品的單價為空白。訂單：${pick(sample,profile.orderId)} / 商品：${pick(sample,profile.productId)}`);
+        updateSalesProgress(57,`已辨識「${unitHeader}」；抽樣單價 ${detectedUnit||'—'} 円，開始建立逐商品明細…`);
+      }
       let cancelled=0;const countedOrders=new Set(),rows=[];
       for(let i=0;i<r.data.length;i++){
         const x=r.data[i],status=pick(x,profile.status||[]).toLowerCase();
@@ -982,7 +991,13 @@ async function runHealthCheck(){try{$('healthResult').textContent='檢查中…'
 async function loadHistory(){const s=await getDocs(query(collection(db,'imports'),orderBy('importedAt','desc'),limit(100)));$('historyRows').innerHTML=s.docs.map(d=>{const x=d.data();return`<tr><td>${x.importedAt?.toDate?x.importedAt.toDate().toLocaleString('zh-TW'):''}</td><td>${esc(x.type)}</td><td>${esc(x.platform)}</td><td>${esc(x.fileName)}</td><td>${fmt(x.total)}</td><td>${fmt(x.written)}</td><td>${fmt(x.skipped)}</td><td>${esc(x.importedBy)}</td></tr>`}).join('')}
 function chart(id,type,labels,datasets,extraOptions={}){state.charts[id]?.destroy();state.charts[id]=new Chart($(id),{type,data:{labels,datasets},options:{responsive:true,maintainAspectRatio:false,...extraOptions}})}
 function month(t){const d=t?.toDate?t.toDate():new Date(t);return monthFromDate(d)}function monthFromDate(d){return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')}function fdLocal(d){return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0')}
-function pick(o,n){for(const k of n)if(o[k]!==undefined&&String(o[k]).trim()!=='')return String(o[k]).trim();return''}
+function normalizeCsvHeader(v){return String(v??'').replace(/^\ufeff/,'').replace(/[\u3000\s]+/g,'').trim()}
+function pick(o,n){
+  for(const k of n)if(o[k]!==undefined&&String(o[k]).trim()!=='')return String(o[k]).trim();
+  const normalized=new Map(Object.keys(o||{}).map(k=>[normalizeCsvHeader(k),k]));
+  for(const wanted of n){const actual=normalized.get(normalizeCsvHeader(wanted));if(actual!==undefined&&String(o[actual]??'').trim()!=='')return String(o[actual]).trim()}
+  return''
+}
 function parseDate(v){const raw=String(v||'').trim();if(!raw)throw new Error('日期欄位為空');const jp=raw.match(/(\d{4})年(\d{1,2})月(\d{1,2})日/);if(jp)return new Date(+jp[1],+jp[2]-1,+jp[3]);const s=raw.replace(/\./g,'/').replace(/-/g,'/'),m=s.match(/^(\d{4})\/(\d{1,2})\/(\d{1,2})/);if(m)return new Date(+m[1],+m[2]-1,+m[3]);const d=new Date(raw);if(isNaN(d))throw new Error('無法辨識日期：'+raw);return new Date(d.getFullYear(),d.getMonth(),d.getDate())}
 function parseRakutenAdDate(v){
   const raw=String(v||'').trim();
