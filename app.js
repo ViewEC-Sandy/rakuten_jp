@@ -22,8 +22,13 @@ const isHiddenProject=value=>HIDE_PROJECTS.has(String(value||'').trim());
 const titles={overview:'營運總覽',platforms:'平台比較',profitability:'收益結構分析',products:'商品跨平台',groups:'專案分析',ads:'樂天廣告分析',productAnalysis:'商品分析',master:'商品主檔',costPricing:'商品成本・定價',pricing:'定價試算',salesStatus:'銷售狀態',calcParams:'計算參數',import:'資料匯入',history:'匯入紀錄',maintenance:'系統維護'};
 
 const salesImportProfiles={
-  rakuten:{orderId:['注文番号'],date:['注文日'],productId:['商品番号'],managementNumber:['商品管理番号'],quantity:['個数','数量'],unitPrice:['単価','商品単価'],itemTotal:['商品合計金額'],shippingTotal:['送料合計'],coupon:['店舗発行クーポン利用額'],status:['ステータス'],cancelled:['900']},
-  shopify:{orderId:['Name'],date:['Created at'],productId:['Lineitem sku'],managementNumber:['Variant SKU','商品管理番号'],quantity:['Lineitem quantity'],unitPrice:['Lineitem price'],revenue:['Total'],status:['Financial Status'],cancelled:['refunded']}
+  rakuten:{
+    orderId:['注文番号'],date:['注文日'],productId:['商品番号'],managementNumber:['商品管理番号'],
+    productName:['商品名'],quantity:['個数','数量'],unitPrice:['単価','商品単価'],pointMultiplier:['ポイント倍率'],
+    itemTotal:['商品合計金額'],shippingTotal:['送料合計'],storeCoupon:['店舗発行クーポン利用額'],
+    rakutenCoupon:['楽天発行クーポン利用額'],status:['ステータス'],cancelled:['900']
+  },
+  shopify:{orderId:['Name'],date:['Created at'],productId:['Lineitem sku'],managementNumber:['Variant SKU','商品管理番号'],productName:['Lineitem name','Lineitem title'],quantity:['Lineitem quantity'],unitPrice:['Lineitem price'],revenue:['Total'],status:['Financial Status'],cancelled:['refunded']}
 };
 
 document.querySelectorAll('[data-page]').forEach(b=>b.onclick=()=>show(b.dataset.page));
@@ -657,15 +662,27 @@ async function importSales(file){
         const date=pick(x,profile.date),orderId=pick(x,profile.orderId),productId=pick(x,profile.productId),managementNumber=pick(x,profile.managementNumber),line=String(i+1);
         if(!date||!orderId||!productId)continue;
         const d=parseDate(date),quantity=num(pick(x,profile.quantity)),unitPrice=num(pick(x,profile.unitPrice));
-        let grossRevenue=0,couponAmount=0,revenue=0;
+        const productNameJa=pick(x,profile.productName||[]),lineAmountJPY=unitPrice*quantity;
+        const pointMultiplier=num(pick(x,profile.pointMultiplier||[]))||0;
+        let grossRevenue=0,couponAmount=0,revenue=0,storeCouponJPY=0,rakutenCouponJPY=0;
         if(p==='rakuten'){
           const firstOrderRow=!countedOrders.has(orderId);countedOrders.add(orderId);
           const itemTotal=num(pick(x,profile.itemTotal||[])),shippingTotal=num(pick(x,profile.shippingTotal||[]));
-          couponAmount=num(pick(x,profile.coupon||[]));grossRevenue=firstOrderRow?itemTotal+shippingTotal:0;revenue=firstOrderRow?grossRevenue-couponAmount:0;
+          storeCouponJPY=num(pick(x,profile.storeCoupon||[]));
+          rakutenCouponJPY=num(pick(x,profile.rakutenCoupon||[]));
+          // Japan EC Dashboard 營收仍維持訂單層級邏輯，避免同一訂單多商品時重複計入。
+          couponAmount=storeCouponJPY;
+          grossRevenue=firstOrderRow?itemTotal+shippingTotal:0;
+          revenue=firstOrderRow?grossRevenue-storeCouponJPY:0;
         }else{
-          const directRevenue=pick(x,profile.revenue),value=directRevenue?num(directRevenue):unitPrice*quantity;grossRevenue=value;revenue=value;
+          const directRevenue=pick(x,profile.revenue),value=directRevenue?num(directRevenue):lineAmountJPY;grossRevenue=value;revenue=value;
         }
-        rows.push({id:safe(p+'_'+orderId+'_'+productId+'_'+line),platform:canonicalPlatform(p),orderId,productId,managementNumber,quantity,unitPrice,grossRevenue,couponAmount,revenue,saleDate:Timestamp.fromDate(d),year:d.getFullYear(),month:monthFromDate(d),sourceFile:file.name,updatedAt:serverTimestamp()});
+        rows.push({
+          id:safe(p+'_'+orderId+'_'+productId+'_'+line),platform:canonicalPlatform(p),orderId,productId,managementNumber,
+          productNameJa,quantity,unitPrice,unitPriceJPY:unitPrice,lineAmountJPY,pointMultiplier,
+          storeCouponJPY,rakutenCouponJPY,grossRevenue,couponAmount,revenue,
+          saleDate:Timestamp.fromDate(d),year:d.getFullYear(),month:monthFromDate(d),sourceFile:file.name,updatedAt:serverTimestamp()
+        });
         if(i%500===0)updateSalesProgress(56+Math.min(9,Math.round(i/Math.max(r.data.length,1)*9)),`整理銷售資料中… ${i} / ${r.data.length}`);
       }
       updateSalesProgress(66,`整理完成：有效 ${rows.length} 筆、取消／退款排除 ${cancelled} 筆`);
