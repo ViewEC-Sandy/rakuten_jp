@@ -640,6 +640,14 @@ async function importPartialProductFields(file){
 
 async function deleteCollectionDocuments(collectionName,onProgress){const snap=await getDocs(collection(db,collectionName)),total=snap.docs.length;for(let i=0;i<total;i+=400){const batch=writeBatch(db),part=snap.docs.slice(i,i+400);part.forEach(d=>batch.delete(d.ref));await commitWithRetry(batch);onProgress?.(Math.min(i+part.length,total),total);if(i+part.length<total)await wait(100)}return total}
 
+async function cleanupLegacySalesRowsForOverwrite(rows,platform,onProgress){
+  if(!rows.length)return 0;
+  const wanted=new Set(rows.map(r=>[canonicalPlatform(platform),String(r.orderId||'').trim().toLowerCase(),String(r.productId||'').trim().toLowerCase(),String(r.managementNumber||'').trim().toLowerCase()].join('||')));
+  const snap=await getDocs(collection(db,'sales'));
+  const victims=snap.docs.filter(d=>{const x=d.data();const key=[canonicalPlatform(x.platform),String(x.orderId||'').trim().toLowerCase(),String(x.productId||'').trim().toLowerCase(),String(x.managementNumber||'').trim().toLowerCase()].join('||');return wanted.has(key)});
+  for(let i=0;i<victims.length;i+=400){const b=writeBatch(db),part=victims.slice(i,i+400);part.forEach(d=>b.delete(d.ref));await commitWithRetry(b);onProgress?.(Math.min(i+part.length,victims.length),victims.length)}
+  return victims.length;
+}
 $('salesFile').onchange=e=>e.target.files?.[0]&&importSales(e.target.files[0]);
 async function importSales(file){
   const p=$('importPlatform').value,profile=salesImportProfiles[p];
@@ -690,6 +698,11 @@ async function importSales(file){
       if($('duplicate').value==='skip'){
         $('salesStatus').textContent=`檢查重複資料中…（${rows.length} 筆）`;updateSalesProgress(68,`檢查重複資料中… ${rows.length} 筆`);
         const existing=await existingIdSet('sales');write=rows.filter(x=>!existing.has(x.id));skipped=rows.length-write.length;
+      }
+      if($('duplicate').value==='overwrite'){
+        updateSalesProgress(68,'覆蓋模式：清除同訂單／商品的舊明細，避免舊資料與新版欄位並存…');
+        const removed=await cleanupLegacySalesRowsForOverwrite(rows,p,(done,total)=>updateSalesProgress(68+Math.round((done/Math.max(total,1))*4),`清除舊明細… ${done} / ${total}`));
+        $('salesStatus').textContent=`覆蓋模式：已清除 ${removed} 筆舊明細，準備寫入 ${write.length} 筆新版明細…`;
       }
       updateSalesProgress(72,`準備寫入資料庫… ${write.length} 筆`);
       await batchWrite('sales',write,x=>x.id,(done,total)=>{
